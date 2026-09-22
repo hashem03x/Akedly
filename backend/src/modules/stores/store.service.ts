@@ -3,11 +3,17 @@ import { env } from "../../config/env";
 import { ApiError } from "../../utils/api-error";
 import { decryptSecret, encryptSecret } from "../../utils/crypto";
 import { getStoreProvider } from "../../integrations/store-providers";
+import type { StoreConnectionInput } from "../../integrations/store-providers/store-provider.interface";
+import {
+  getValidShopifyAccessToken,
+  ShopifyReauthorizationRequiredError,
+} from "../../integrations/store-providers/shopify-token-service";
+import type { ShopifyOfflineTokenResult } from "../../integrations/store-providers/shopify-oauth";
 import { StoreModel, type StoreDocument, type StorePlatform } from "./store.model";
 import type { ConnectWooCommerceInput, UpdateStoreSettingsInput } from "./store.types";
 
 const CREDENTIAL_FIELDS =
-  "+credentials.accessToken +credentials.consumerKey +credentials.consumerSecret +credentials.webhookSecret";
+  "+credentials.accessToken +credentials.refreshToken +credentials.consumerKey +credentials.consumerSecret +credentials.webhookSecret";
 
 export async function listStoresForMerchant(merchantId: string): Promise<StoreDocument[]> {
   return StoreModel.find({ merchantId }).sort({ createdAt: -1 });
@@ -22,21 +28,48 @@ export async function getOwnedStore(merchantId: string, storeId: string): Promis
 }
 
 /**
+ * Builds the credential input a StoreProvider needs for this store, resolving
+ * Shopify's access token through the centralized expiring-token lifecycle
+ * (refreshing it first if it's missing/expired/expiring soon) rather than ever
+ * reading a possibly-stale `store.credentials.accessToken` directly.
+ * WooCommerce credentials don't expire, so those are decrypted as-is.
+ */
+async function buildStoreConnectionInput(store: StoreDocument): Promise<StoreConnectionInput> {
+  if (store.platform === "shopify") {
+    const accessToken = await getValidShopifyAccessToken(store.id);
+    return { domain: store.domain, accessToken };
+  }
+
+  return {
+    domain: store.domain,
+    consumerKey: store.credentials?.consumerKey ? decryptSecret(store.credentials.consumerKey) : undefined,
+    consumerSecret: store.credentials?.consumerSecret
+      ? decryptSecret(store.credentials.consumerSecret)
+      : undefined,
+  };
+}
+
+/**
  * Creates or updates the merchant's Shopify store from a completed OAuth exchange.
  * Reuses the exact same ShopifyProvider (testConnection/registerWebhooks) that the
- * rest of the app already depends on — OAuth only supplies the access token.
+ * rest of the app already depends on — OAuth only supplies the token.
  *
- * Reconnecting the same shop (merchant re-authorizes, or the token is refreshed)
- * updates the existing Store record instead of creating a duplicate, since
- * (merchantId, platform, domain) is unique.
+ * Reconnecting the same shop (merchant re-authorizes, or a legacy credential is
+ * being replaced) updates the existing Store record instead of creating a
+ * duplicate, since (merchantId, platform, domain) is unique.
+ *
+ * The freshly-exchanged token is used directly for the initial connection test —
+ * there's no prior stored credential to resolve via the token lifecycle service
+ * yet, and this is the one place a fresh (not-yet-persisted) token is legitimately
+ * used without going through getValidShopifyAccessToken.
  */
 export async function upsertShopifyStoreFromOAuth(
   merchantId: string,
   shop: string,
-  accessToken: string
+  token: ShopifyOfflineTokenResult
 ): Promise<StoreDocument> {
   const provider = getStoreProvider("shopify");
-  const test = await provider.testConnection({ domain: shop, accessToken });
+  const test = await provider.testConnection({ domain: shop, accessToken: token.accessToken });
   if (!test.ok) {
     throw ApiError.badRequest("STORE_CONNECTION_FAILED", test.error ?? "Could not connect to Shopify.");
   }
@@ -48,7 +81,12 @@ export async function upsertShopifyStoreFromOAuth(
     store.name = test.storeName || store.name;
   }
 
-  store.credentials = { accessToken: encryptSecret(accessToken) };
+  store.credentials = {
+    accessToken: encryptSecret(token.accessToken),
+    refreshToken: token.refreshToken ? encryptSecret(token.refreshToken) : undefined,
+    accessTokenExpiresAt: token.accessTokenExpiresAt,
+    refreshTokenExpiresAt: token.refreshTokenExpiresAt,
+  };
   store.status = "connected";
   store.lastConnectionTestAt = new Date();
   store.lastConnectionError = undefined;
@@ -102,25 +140,16 @@ async function registerStoreWebhooks(storeId: string): Promise<void> {
   const provider = getStoreProvider(store.platform as StorePlatform);
 
   try {
-    await provider.registerWebhooks(
-      {
-        domain: store.domain,
-        accessToken: store.credentials?.accessToken
-          ? decryptSecret(store.credentials.accessToken)
-          : undefined,
-        consumerKey: store.credentials?.consumerKey
-          ? decryptSecret(store.credentials.consumerKey)
-          : undefined,
-        consumerSecret: store.credentials?.consumerSecret
-          ? decryptSecret(store.credentials.consumerSecret)
-          : undefined,
-      },
-      env.backendUrl
-    );
+    const input = await buildStoreConnectionInput(store);
+    await provider.registerWebhooks(input, env.backendUrl);
   } catch (err) {
-    store.status = "error";
-    store.lastConnectionError = err instanceof Error ? err.message : "Webhook registration failed.";
-    await store.save();
+    // A reauth requirement was already recorded by the token service itself;
+    // don't downgrade that clearer status to a generic "error" here.
+    if (!(err instanceof ShopifyReauthorizationRequiredError)) {
+      store.status = "error";
+      store.lastConnectionError = err instanceof Error ? err.message : "Webhook registration failed.";
+      await store.save();
+    }
   }
 }
 
@@ -129,20 +158,25 @@ export async function testStoreConnection(merchantId: string, storeId: string): 
   if (!store) throw ApiError.notFound("Store not found.", "STORE_NOT_FOUND");
 
   const provider = getStoreProvider(store.platform as StorePlatform);
-  const result = await provider.testConnection({
-    domain: store.domain,
-    accessToken: store.credentials?.accessToken ? decryptSecret(store.credentials.accessToken) : undefined,
-    consumerKey: store.credentials?.consumerKey ? decryptSecret(store.credentials.consumerKey) : undefined,
-    consumerSecret: store.credentials?.consumerSecret
-      ? decryptSecret(store.credentials.consumerSecret)
-      : undefined,
-  });
 
-  store.lastConnectionTestAt = new Date();
-  store.status = result.ok ? "connected" : "error";
-  store.lastConnectionError = result.ok ? undefined : result.error;
-  await store.save();
-  return store;
+  try {
+    const input = await buildStoreConnectionInput(store);
+    const result = await provider.testConnection(input);
+
+    store.lastConnectionTestAt = new Date();
+    store.status = result.ok ? "connected" : "error";
+    store.lastConnectionError = result.ok ? undefined : result.error;
+    await store.save();
+    return store;
+  } catch (err) {
+    if (err instanceof ShopifyReauthorizationRequiredError) {
+      // Status/lastConnectionError were already set by the token service;
+      // re-read so the caller gets the persisted state back.
+      const refreshed = await StoreModel.findById(storeId);
+      return refreshed ?? store;
+    }
+    throw err;
+  }
 }
 
 export async function disconnectStore(merchantId: string, storeId: string): Promise<StoreDocument> {
@@ -162,3 +196,5 @@ export async function updateStoreSettings(
   await store.save();
   return store;
 }
+
+export { buildStoreConnectionInput };

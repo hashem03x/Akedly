@@ -113,17 +113,25 @@ export const shopifyOAuthCallback = asyncHandler(async (req: Request, res: Respo
       return redirectToStoresError(res, "merchant_not_found");
     }
 
-    let accessToken: string;
+    let token: Awaited<ReturnType<typeof exchangeShopifyCodeForToken>>;
     try {
-      const exchanged = await exchangeShopifyCodeForToken(shop, code);
-      accessToken = exchanged.accessToken;
+      token = await exchangeShopifyCodeForToken(shop, code);
     } catch (err) {
       logger.error("Shopify OAuth token exchange failed", { shop, message: (err as Error).message });
       return redirectToStoresError(res, "oauth_exchange_failed", merchant);
     }
 
+    if (!token.accessTokenExpiresAt || !token.refreshToken) {
+      // Shopify only omits these when `expiring=1` wasn't honored — should never
+      // happen since we always send it, but a silently-non-expiring token is
+      // exactly the bug this migration exists to prevent, so fail loudly rather
+      // than persisting a credential the Admin API will reject anyway.
+      logger.error("Shopify token exchange did not return an expiring offline token", { shop });
+      return redirectToStoresError(res, "connection_failed", merchant);
+    }
+
     try {
-      await upsertShopifyStoreFromOAuth(merchant.id, shop, accessToken);
+      await upsertShopifyStoreFromOAuth(merchant.id, shop, token);
     } catch (err) {
       logger.error("Failed to finalize Shopify store connection after OAuth", {
         shop,

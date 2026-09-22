@@ -284,6 +284,9 @@ describe("Shopify OAuth callback", () => {
     exchangeShopifyCodeForToken.mockResolvedValueOnce({
       accessToken: "shpat_fake_token",
       scope: "read_orders,write_orders",
+      refreshToken: "shprt_fake_refresh_token",
+      accessTokenExpiresAt: new Date(Date.now() + 60 * 60 * 1000),
+      refreshTokenExpiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000),
     });
 
     const originalFetch = global.fetch;

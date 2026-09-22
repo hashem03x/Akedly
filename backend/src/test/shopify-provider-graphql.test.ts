@@ -1,6 +1,11 @@
 // IMPORTANT: process.env must be set before anything that transitively imports
 // config/env.ts is required — ES `import` statements are hoisted above plain
 // statements, so any local-module `import` here would load env.ts too early.
+// The `export {}` below has no runtime effect — it just forces TypeScript to
+// treat this file as its own module scope instead of a global script, so its
+// top-level const/function names don't collide with other test files that
+// use this same require()-after-process.env pattern.
+export {};
 process.env.SHOPIFY_API_VERSION = "2024-07";
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires

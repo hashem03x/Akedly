@@ -204,7 +204,14 @@
     "configure": "إعداد",
     "testConnection": "اختبار الاتصال",
     "disconnect": "فصل الاتصال",
-    "status": { "connected": "متصل", "disconnected": "غير متصل", "error": "خطأ في الاتصال" },
+    "reconnect": "إعادة ربط Shopify",
+    "reauthRequiredHint": "لازم تجدد تفويض Shopify قبل ما يقدر أكدلي يأكد طلبات هذا المتجر.",
+    "status": {
+      "connected": "متصل",
+      "disconnected": "غير متصل",
+      "error": "خطأ في الاتصال",
+      "reauth_required": "يتطلب إعادة التفويض"
+    },
     "empty": "لا توجد متاجر مربوطة بعد.",
     "disconnectConfirmTitle": "فصل هذا المتجر؟",
     "disconnectConfirmBody": "أكدلي هيوقف إرسال التأكيدات للطلبات الجديدة من هذا المتجر.",

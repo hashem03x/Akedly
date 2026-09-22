@@ -13,6 +13,7 @@ const STATUS_TONE = {
   connected: "success",
   disconnected: "neutral",
   error: "danger",
+  reauth_required: "warning",
 } as const;
 
 export function StoreCard({ store }: { store: Store }) {
@@ -61,10 +62,25 @@ export function StoreCard({ store }: { store: Store }) {
         <Badge tone={STATUS_TONE[store.status]}>{t(`status.${store.status}`)}</Badge>
       </div>
 
-      {store.lastConnectionError && (
-        <p className="mt-3 text-sm text-danger">{store.lastConnectionError}</p>
+      {store.status === "reauth_required" ? (
+        <p className="mt-3 text-sm text-warning">{t("reauthRequiredHint")}</p>
+      ) : (
+        store.lastConnectionError && <p className="mt-3 text-sm text-danger">{store.lastConnectionError}</p>
       )}
       {error && <p className="mt-3 text-sm text-danger">{error}</p>}
+
+      {store.status === "reauth_required" && store.platform === "shopify" && (
+        <div className="mt-4">
+          <Button
+            size="sm"
+            onClick={() =>
+              (window.location.href = `/api/v1/integrations/shopify/oauth/start?shop=${encodeURIComponent(store.domain)}`)
+            }
+          >
+            {t("reconnect")}
+          </Button>
+        </div>
+      )}
 
       {confirmingDisconnect ? (
         <div className="mt-4 rounded-md border border-danger/30 bg-danger/5 p-3">

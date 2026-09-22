@@ -33,7 +33,7 @@ export interface Merchant {
 }
 
 export type StorePlatform = "shopify" | "woocommerce";
-export type StoreStatus = "connected" | "disconnected" | "error";
+export type StoreStatus = "connected" | "disconnected" | "error" | "reauth_required";
 
 export interface StoreSettings {
   autoConfirmationEnabled: boolean;

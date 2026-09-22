@@ -29,15 +29,69 @@ export function buildShopifyAuthorizeUrl(shop: string, state: string, redirectUr
   return `https://${shop}/admin/oauth/authorize?${params.toString()}`;
 }
 
-export interface ShopifyTokenExchangeResult {
-  accessToken: string;
-  scope: string;
+/**
+ * Thrown whenever Shopify tells us — definitively — that the stored credential
+ * can no longer be used and the merchant must go through OAuth again:
+ * - the stored credential predates this app's expiring-token migration
+ *   (legacy non-expiring token; there's nothing to refresh), or
+ * - the refresh token itself is invalid/expired/revoked (Shopify's documented
+ *   401 `{ error: "invalid_request" }` response from the refresh endpoint).
+ * Callers must not retry a refresh in a loop when they catch this — the fix is
+ * merchant reauthorization, not another API call.
+ */
+export class ShopifyReauthorizationRequiredError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ShopifyReauthorizationRequiredError";
+  }
 }
 
+export interface ShopifyOfflineTokenResult {
+  accessToken: string;
+  scope: string;
+  /** Present for expiring offline tokens; undefined for a legacy non-expiring token. */
+  refreshToken?: string;
+  accessTokenExpiresAt?: Date;
+  refreshTokenExpiresAt?: Date;
+}
+
+interface ShopifyTokenEndpointBody {
+  access_token?: string;
+  scope?: string;
+  expires_in?: number;
+  refresh_token?: string;
+  refresh_token_expires_in?: number;
+  error?: string;
+  error_description?: string;
+}
+
+function secondsFromNow(seconds: number | undefined): Date | undefined {
+  return typeof seconds === "number" ? new Date(Date.now() + seconds * 1000) : undefined;
+}
+
+function parseTokenResponse(body: ShopifyTokenEndpointBody): ShopifyOfflineTokenResult {
+  if (!body.access_token) {
+    throw new Error("Shopify token response did not include an access token.");
+  }
+  return {
+    accessToken: body.access_token,
+    scope: body.scope ?? "",
+    refreshToken: body.refresh_token,
+    accessTokenExpiresAt: secondsFromNow(body.expires_in),
+    refreshTokenExpiresAt: secondsFromNow(body.refresh_token_expires_in),
+  };
+}
+
+/**
+ * Exchanges an OAuth authorization code for an *expiring* offline access token.
+ * `expiring: "1"` is required — without it Shopify silently issues the legacy
+ * non-expiring token, which the Admin API now rejects outright (see
+ * https://shopify.dev/docs/apps/build/authentication-authorization/migrate-to-expiring-offline-access-tokens).
+ */
 export async function exchangeShopifyCodeForToken(
   shop: string,
   code: string
-): Promise<ShopifyTokenExchangeResult> {
+): Promise<ShopifyOfflineTokenResult> {
   const res = await fetch(`https://${shop}/admin/oauth/access_token`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -45,6 +99,7 @@ export async function exchangeShopifyCodeForToken(
       client_id: env.shopify.clientId,
       client_secret: env.shopify.clientSecret,
       code,
+      expiring: "1",
     }),
   });
 
@@ -52,12 +107,45 @@ export async function exchangeShopifyCodeForToken(
     throw new Error(`Shopify token exchange failed with status ${res.status}`);
   }
 
-  const body = (await res.json()) as { access_token?: string; scope?: string };
-  if (!body.access_token) {
-    throw new Error("Shopify token exchange response did not include an access token.");
+  const body = (await res.json()) as ShopifyTokenEndpointBody;
+  return parseTokenResponse(body);
+}
+
+/**
+ * Exchanges a still-valid refresh token for a new expiring offline access token.
+ * Shopify replaces the refresh token on every use — the caller must persist the
+ * *new* refresh token, not keep reusing the old one.
+ */
+export async function refreshShopifyOfflineToken(
+  shop: string,
+  refreshToken: string
+): Promise<ShopifyOfflineTokenResult> {
+  const res = await fetch(`https://${shop}/admin/oauth/access_token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      grant_type: "refresh_token",
+      client_id: env.shopify.clientId,
+      client_secret: env.shopify.clientSecret,
+      refresh_token: refreshToken,
+    }),
+  });
+
+  const body = (await res.json().catch(() => ({}))) as ShopifyTokenEndpointBody;
+
+  if (res.status === 401 && body.error === "invalid_request") {
+    // Shopify's documented signal that the refresh token is dead (expired /
+    // revoked / already superseded) — the merchant must reauthorize.
+    throw new ShopifyReauthorizationRequiredError(
+      "Shopify refresh token is no longer valid; merchant reauthorization is required."
+    );
   }
 
-  return { accessToken: body.access_token, scope: body.scope ?? "" };
+  if (!res.ok) {
+    throw new Error(`Shopify token refresh failed with status ${res.status}`);
+  }
+
+  return parseTokenResponse(body);
 }
 
 /**

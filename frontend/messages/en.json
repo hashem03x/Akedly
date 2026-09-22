@@ -204,7 +204,14 @@
     "configure": "Configure",
     "testConnection": "Test Connection",
     "disconnect": "Disconnect",
-    "status": { "connected": "Connected", "disconnected": "Disconnected", "error": "Connection error" },
+    "reconnect": "Reconnect Shopify",
+    "reauthRequiredHint": "Shopify authorization needs to be renewed before Akedly can confirm orders for this store.",
+    "status": {
+      "connected": "Connected",
+      "disconnected": "Disconnected",
+      "error": "Connection error",
+      "reauth_required": "Reauthorization required"
+    },
     "empty": "No stores connected yet.",
     "disconnectConfirmTitle": "Disconnect this store?",
     "disconnectConfirmBody": "Akedly will stop sending confirmations for new orders from this store.",

@@ -3,7 +3,7 @@ import { Schema, model, Types, type InferSchemaType, type HydratedDocument } fro
 export const STORE_PLATFORMS = ["shopify", "woocommerce"] as const;
 export type StorePlatform = (typeof STORE_PLATFORMS)[number];
 
-export const STORE_STATUSES = ["connected", "disconnected", "error"] as const;
+export const STORE_STATUSES = ["connected", "disconnected", "error", "reauth_required"] as const;
 export type StoreStatus = (typeof STORE_STATUSES)[number];
 
 const storeSettingsSchema = new Schema(
@@ -26,6 +26,12 @@ const storeSchema = new Schema(
     // Encrypted at rest (see utils/crypto.ts). Never sent to the frontend.
     credentials: {
       accessToken: { type: String, select: false }, // Shopify admin API access token
+      // Shopify expiring-offline-token lifecycle (see shopify-token-service.ts).
+      // Absent on credentials created before this migration — that absence is
+      // exactly how a legacy (non-expiring) token is detected.
+      refreshToken: { type: String, select: false },
+      accessTokenExpiresAt: { type: Date },
+      refreshTokenExpiresAt: { type: Date },
       consumerKey: { type: String, select: false }, // WooCommerce
       consumerSecret: { type: String, select: false }, // WooCommerce
       webhookSecret: { type: String, select: false }, // WooCommerce delivery signature secret

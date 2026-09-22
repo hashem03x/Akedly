@@ -1,10 +1,10 @@
 import { ApiError } from "../../utils/api-error";
 import { logger } from "../../utils/logger";
-import { decryptSecret } from "../../utils/crypto";
 import { getStoreProvider } from "../../integrations/store-providers";
 import { getWhatsAppProvider } from "../../integrations/confirmation-providers";
 import { recordCommunication } from "../communications/communication.service";
 import { StoreModel, type StoreDocument, type StorePlatform } from "../stores/store.model";
+import { buildStoreConnectionInput } from "../stores/store.service";
 import { OrderModel, type OrderDocument, type ConfirmationStatus } from "../orders/order.model";
 
 const ALLOWED_TRANSITIONS: Record<ConfirmationStatus, ConfirmationStatus[]> = {
@@ -71,24 +71,17 @@ export async function sendConfirmationForOrder(
 
 async function syncOrderToStore(order: OrderDocument, status: "confirmed" | "cancelled"): Promise<void> {
   const store = await StoreModel.findOne({ _id: order.storeId }).select(
-    "+credentials.accessToken +credentials.consumerKey +credentials.consumerSecret"
+    "+credentials.accessToken +credentials.refreshToken +credentials.consumerKey +credentials.consumerSecret"
   );
   if (!store) return;
 
   const provider = getStoreProvider(store.platform as StorePlatform);
 
   try {
-    await provider.syncOrderStatus(
-      {
-        domain: store.domain,
-        accessToken: store.credentials?.accessToken ? decryptSecret(store.credentials.accessToken) : undefined,
-        consumerKey: store.credentials?.consumerKey ? decryptSecret(store.credentials.consumerKey) : undefined,
-        consumerSecret: store.credentials?.consumerSecret
-          ? decryptSecret(store.credentials.consumerSecret)
-          : undefined,
-      },
-      { externalOrderId: order.externalOrderId, status }
-    );
+    // Resolves a valid (refreshed if necessary) Shopify token, or decrypts
+    // WooCommerce's static keys — never reads a possibly-stale token directly.
+    const input = await buildStoreConnectionInput(store);
+    await provider.syncOrderStatus(input, { externalOrderId: order.externalOrderId, status });
     await recordCommunication({
       merchantId: String(order.merchantId),
       orderId: order.id,
