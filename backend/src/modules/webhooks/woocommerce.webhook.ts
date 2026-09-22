@@ -8,7 +8,7 @@ import { getStoreProvider } from "../../integrations/store-providers";
 import { StoreModel } from "../stores/store.model";
 import { ingestOrder } from "../orders/order.service";
 import { sendConfirmationForOrder } from "../confirmations/confirmation.service";
-import { claimWebhookEvent } from "./webhook-event.model";
+import { claimWebhookEvent, completeWebhookEvent, failWebhookEvent } from "./webhook-event.model";
 
 export const handleWooCommerceWebhook = asyncHandler(async (req: Request, res: Response) => {
   const rawBody = req.body as Buffer;
@@ -42,10 +42,26 @@ export const handleWooCommerceWebhook = asyncHandler(async (req: Request, res: R
     return sendSuccess(res, { deduplicated: true });
   }
 
-  const payload = JSON.parse(rawBody.toString("utf8"));
-  const normalized = provider.normalizeOrder(payload);
-  const { order, created } = await ingestOrder(store, normalized);
+  let order;
+  let created: boolean;
+  try {
+    const payload = JSON.parse(rawBody.toString("utf8"));
+    const normalized = provider.normalizeOrder(payload);
+    ({ order, created } = await ingestOrder(store, normalized));
+  } catch (err) {
+    // Leaves the event retryable rather than permanently claimed, so a transient
+    // failure here doesn't silently swallow every future retry of this delivery.
+    await failWebhookEvent("woocommerce", idempotencyKey);
+    logger.error("woocommerce_webhook_processing_failed", {
+      storeId: store.id,
+      webhookId: idempotencyKey,
+      errorName: err instanceof Error ? err.name : "UnknownError",
+      errorMessage: err instanceof Error ? err.message : String(err),
+    });
+    throw err;
+  }
 
+  await completeWebhookEvent("woocommerce", idempotencyKey);
   sendSuccess(res, { orderId: order.id, created });
 
   if (created && store.settings?.autoConfirmationEnabled) {

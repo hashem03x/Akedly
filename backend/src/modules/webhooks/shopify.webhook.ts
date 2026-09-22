@@ -8,7 +8,7 @@ import { getStoreProvider } from "../../integrations/store-providers";
 import { StoreModel } from "../stores/store.model";
 import { ingestOrder } from "../orders/order.service";
 import { sendConfirmationForOrder } from "../confirmations/confirmation.service";
-import { claimWebhookEvent } from "./webhook-event.model";
+import { claimWebhookEvent, completeWebhookEvent, failWebhookEvent } from "./webhook-event.model";
 
 const ORDERS_CREATE_TOPIC = "orders/create";
 
@@ -68,27 +68,71 @@ export const handleShopifyWebhook = asyncHandler(async (req: Request, res: Respo
   const idempotencyKey = webhookId ?? crypto.createHash("sha256").update(rawBody).digest("hex");
   const isNewDelivery = await claimWebhookEvent("shopify", idempotencyKey);
   if (!isNewDelivery) {
+    logger.info("shopify_webhook_deduplicated", { shop: domain, storeId: store.id, webhookId: idempotencyKey });
     return sendSuccess(res, { deduplicated: true });
   }
+  logger.info("shopify_webhook_claimed", { shop: domain, storeId: store.id, webhookId: idempotencyKey });
 
-  const payload = JSON.parse(rawBody.toString("utf8"));
-  const normalized = provider.normalizeOrder(payload);
-  const { order, created } = await ingestOrder(store, normalized);
-  logger.info("akedly_order_created", { shop: domain, orderId: order.id, created });
+  let payload: unknown;
+  try {
+    payload = JSON.parse(rawBody.toString("utf8"));
+  } catch (err) {
+    // Not retryable — corrupted JSON won't fix itself on redelivery — so this is
+    // marked failed (not left "processing") but acknowledged with a client error
+    // rather than a 500 that would trigger pointless Shopify retries.
+    await failWebhookEvent("shopify", idempotencyKey);
+    logger.error("shopify_webhook_processing_failed", {
+      shop: domain,
+      storeId: store.id,
+      webhookId: idempotencyKey,
+      operation: "parse_payload",
+      errorName: err instanceof Error ? err.name : "UnknownError",
+      errorMessage: err instanceof Error ? err.message : String(err),
+    });
+    return sendError(res, 400, "MALFORMED_PAYLOAD", "Webhook payload was not valid JSON.");
+  }
+
+  let order;
+  let created: boolean;
+  try {
+    const normalized = provider.normalizeOrder(payload);
+    ({ order, created } = await ingestOrder(store, normalized));
+  } catch (err) {
+    // Leaves the event retryable (status "failed", not "completed") and responds
+    // non-2xx so Shopify redelivers — a transient failure here (DB hiccup, cold
+    // start timeout, validation edge case) must not permanently blackhole the
+    // order the way an unconditional claim-before-process would.
+    await failWebhookEvent("shopify", idempotencyKey);
+    logger.error("shopify_webhook_processing_failed", {
+      shop: domain,
+      storeId: store.id,
+      webhookId: idempotencyKey,
+      operation: "ingest_order",
+      errorName: err instanceof Error ? err.name : "UnknownError",
+      errorMessage: err instanceof Error ? err.message : String(err),
+    });
+    throw err;
+  }
+
+  await completeWebhookEvent("shopify", idempotencyKey);
+  logger.info("akedly_order_created", { shop: domain, storeId: store.id, orderId: order.id, created });
 
   sendSuccess(res, { orderId: order.id, created });
 
   if (created && store.settings?.autoConfirmationEnabled) {
-    logger.info("confirmation_requested", { shop: domain, orderId: order.id });
+    logger.info("confirmation_requested", { shop: domain, storeId: store.id, orderId: order.id });
     try {
       await sendConfirmationForOrder(order, store);
     } catch (err) {
       logger.error("Failed to send confirmation after Shopify order ingest", {
+        shop: domain,
+        storeId: store.id,
         orderId: order.id,
-        message: (err as Error).message,
+        errorName: err instanceof Error ? err.name : "UnknownError",
+        errorMessage: err instanceof Error ? err.message : String(err),
       });
     }
   } else if (created) {
-    logger.info("confirmation_skipped_auto_confirm_disabled", { shop: domain, orderId: order.id });
+    logger.info("confirmation_skipped_auto_confirm_disabled", { shop: domain, storeId: store.id, orderId: order.id });
   }
 });

@@ -2,7 +2,7 @@ import { StoreModel } from "../modules/stores/store.model";
 import { MerchantModel } from "../modules/merchants/merchant.model";
 import { OrderModel } from "../modules/orders/order.model";
 import { ingestOrder } from "../modules/orders/order.service";
-import { claimWebhookEvent } from "../modules/webhooks/webhook-event.model";
+import { claimWebhookEvent, completeWebhookEvent, failWebhookEvent } from "../modules/webhooks/webhook-event.model";
 import type { NormalizedOrderInput } from "../modules/orders/order.types";
 
 async function createStore() {
@@ -59,8 +59,9 @@ describe("ingestOrder idempotency", () => {
 });
 
 describe("claimWebhookEvent", () => {
-  it("returns true for the first delivery and false for retries of the same event", async () => {
+  it("returns true for the first delivery and false for a retry after it completed successfully", async () => {
     const claimedFirst = await claimWebhookEvent("shopify", "evt-123");
+    await completeWebhookEvent("shopify", "evt-123");
     const claimedSecond = await claimWebhookEvent("shopify", "evt-123");
 
     expect(claimedFirst).toBe(true);
@@ -73,5 +74,31 @@ describe("claimWebhookEvent", () => {
 
     expect(shopify).toBe(true);
     expect(woocommerce).toBe(true);
+  });
+
+  it("keeps an event retryable if it was claimed but never completed (crash mid-processing)", async () => {
+    const claimed = await claimWebhookEvent("shopify", "evt-stuck");
+    expect(claimed).toBe(true);
+
+    // Simulates the process dying between claim and completeWebhookEvent — the
+    // record is stuck at status "processing" forever unless retried.
+    const retried = await claimWebhookEvent("shopify", "evt-stuck");
+    expect(retried).toBe(true);
+  });
+
+  it("allows reprocessing after failWebhookEvent marks a claim as failed", async () => {
+    await claimWebhookEvent("shopify", "evt-failed-once");
+    await failWebhookEvent("shopify", "evt-failed-once");
+
+    const retried = await claimWebhookEvent("shopify", "evt-failed-once");
+    expect(retried).toBe(true);
+  });
+
+  it("treats a completed event as a true duplicate, not retryable", async () => {
+    await claimWebhookEvent("shopify", "evt-done");
+    await completeWebhookEvent("shopify", "evt-done");
+
+    const duplicate = await claimWebhookEvent("shopify", "evt-done");
+    expect(duplicate).toBe(false);
   });
 });

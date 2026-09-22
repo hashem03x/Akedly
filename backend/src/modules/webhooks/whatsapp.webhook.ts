@@ -11,7 +11,7 @@ import { OrderModel } from "../orders/order.model";
 import type { CommunicationDocument } from "../communications/communication.model";
 import { recordCommunication, updateCommunicationStatusByProviderMessageId } from "../communications/communication.service";
 import { confirmOrder, cancelOrder } from "../confirmations/confirmation.service";
-import { claimWebhookEvent } from "./webhook-event.model";
+import { claimWebhookEvent, completeWebhookEvent, failWebhookEvent } from "./webhook-event.model";
 
 /** Meta requires GET verification of the callback URL when it's first configured. */
 export const verifyWhatsAppWebhook = (req: Request, res: Response) => {
@@ -176,26 +176,30 @@ async function processInboundMessage(message: MetaMessage): Promise<void> {
   const isNewDelivery = await claimWebhookEvent("whatsapp", message.id);
   if (!isNewDelivery) return;
 
-  const buttonReply = message.interactive?.button_reply;
-  if (buttonReply) {
-    await processButtonReply(buttonReply, message.id);
-    return;
+  try {
+    const buttonReply = message.interactive?.button_reply;
+    if (buttonReply) {
+      await processButtonReply(buttonReply, message.id);
+    } else if (message.type === "text") {
+      // V1 is a button-only confirmation flow — free-text replies aren't tied to
+      // an order, so they're just logged for visibility, not acted on.
+      logger.info("WhatsApp webhook: received text message", {
+        from: message.from ? maskPhone(message.from) : undefined,
+        messageId: message.id,
+      });
+    } else {
+      logger.info("WhatsApp webhook: received unhandled message type", {
+        type: message.type ?? "unknown",
+        messageId: message.id,
+      });
+    }
+    await completeWebhookEvent("whatsapp", message.id);
+  } catch (err) {
+    // Leaves the event retryable rather than permanently claimed — see
+    // webhook-event.model.ts for why claim-before-process must not be terminal.
+    await failWebhookEvent("whatsapp", message.id);
+    throw err;
   }
-
-  if (message.type === "text") {
-    // V1 is a button-only confirmation flow — free-text replies aren't tied to
-    // an order, so they're just logged for visibility, not acted on.
-    logger.info("WhatsApp webhook: received text message", {
-      from: message.from ? maskPhone(message.from) : undefined,
-      messageId: message.id,
-    });
-    return;
-  }
-
-  logger.info("WhatsApp webhook: received unhandled message type", {
-    type: message.type ?? "unknown",
-    messageId: message.id,
-  });
 }
 
 async function processButtonReply(buttonReply: MetaButtonReply, providerMessageId: string): Promise<void> {
@@ -256,20 +260,26 @@ async function processStatusUpdate(status: MetaStatus): Promise<void> {
   const isNewDelivery = await claimWebhookEvent("whatsapp", idempotencyKey);
   if (!isNewDelivery) return;
 
-  const metadata =
-    status.status === "failed" && status.errors?.length ? { errors: status.errors } : undefined;
+  try {
+    const metadata =
+      status.status === "failed" && status.errors?.length ? { errors: status.errors } : undefined;
 
-  const updated = await updateCommunicationStatusByProviderMessageId(
-    status.id,
-    status.status as CommunicationDocument["status"],
-    metadata
-  );
+    const updated = await updateCommunicationStatusByProviderMessageId(
+      status.id,
+      status.status as CommunicationDocument["status"],
+      metadata
+    );
 
-  if (!updated) {
-    // Not an error — this instance may not have the outbound record (e.g. sent
-    // via a different Akedly deployment/account), or it's for a message we
-    // sent outside the confirmation flow.
-    logger.info("WhatsApp webhook: status update for unknown message id", { messageId: status.id });
+    if (!updated) {
+      // Not an error — this instance may not have the outbound record (e.g. sent
+      // via a different Akedly deployment/account), or it's for a message we
+      // sent outside the confirmation flow.
+      logger.info("WhatsApp webhook: status update for unknown message id", { messageId: status.id });
+    }
+    await completeWebhookEvent("whatsapp", idempotencyKey);
+  } catch (err) {
+    await failWebhookEvent("whatsapp", idempotencyKey);
+    throw err;
   }
 }
 

@@ -19,6 +19,8 @@ const { StoreModel } = require("../modules/stores/store.model");
 const { OrderModel } = require("../modules/orders/order.model");
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { CommunicationModel } = require("../modules/communications/communication.model");
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { WebhookEventModel } = require("../modules/webhooks/webhook-event.model");
 
 const SECRET = "test-shopify-secret";
 
@@ -163,6 +165,47 @@ describe("Shopify orders/create webhook — end-to-end", () => {
     expect(orderCount).toBe(1);
 
     const order = await OrderModel.findOne({ storeId: store._id, externalOrderId: "5004" });
+    const sentCount = await CommunicationModel.countDocuments({
+      orderId: order._id,
+      channel: "whatsapp",
+      type: "confirmation_sent",
+    });
+    expect(sentCount).toBe(1);
+  });
+
+  it("does not permanently blackhole an order when ingestion fails: a retry with the same webhook id is reprocessed", async () => {
+    const store = await createStore();
+    const headers = { domain: store.domain, topic: "orders/create", webhookId: "wh-5006" };
+
+    const createSpy = jest
+      .spyOn(OrderModel, "create")
+      .mockImplementationOnce(() => Promise.reject(new Error("Simulated transient DB failure")));
+
+    const failedAttempt = await postWebhook(app, orderPayload(5006), headers);
+    expect(failedAttempt.status).toBe(500);
+
+    const eventAfterFailure = await WebhookEventModel.findOne({
+      source: "shopify",
+      idempotencyKey: "wh-5006",
+    });
+    expect(eventAfterFailure.status).toBe("failed");
+    expect(await OrderModel.countDocuments({ storeId: store._id, externalOrderId: "5006" })).toBe(0);
+
+    createSpy.mockRestore();
+
+    const retry = await postWebhook(app, orderPayload(5006), headers);
+    expect(retry.status).toBe(200);
+    expect(retry.body.data.created).toBe(true);
+
+    const order = await OrderModel.findOne({ storeId: store._id, externalOrderId: "5006" });
+    expect(order).not.toBeNull();
+
+    const eventAfterRetry = await WebhookEventModel.findOne({
+      source: "shopify",
+      idempotencyKey: "wh-5006",
+    });
+    expect(eventAfterRetry.status).toBe("completed");
+
     const sentCount = await CommunicationModel.countDocuments({
       orderId: order._id,
       channel: "whatsapp",
