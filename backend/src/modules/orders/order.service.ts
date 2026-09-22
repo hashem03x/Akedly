@@ -1,8 +1,15 @@
 import { ApiError } from "../../utils/api-error";
+import { logger } from "../../utils/logger";
 import type { StoreDocument } from "../stores/store.model";
 import { recordCommunication } from "../communications/communication.service";
 import { OrderModel, type OrderDocument, CONFIRMATION_STATUSES } from "./order.model";
 import type { NormalizedOrderInput } from "./order.types";
+
+interface MongoDuplicateKeyError {
+  code?: number;
+  keyPattern?: Record<string, unknown>;
+  keyValue?: Record<string, unknown>;
+}
 
 export interface OrderListFilters {
   status?: (typeof CONFIRMATION_STATUSES)[number];
@@ -56,13 +63,35 @@ export async function ingestOrder(
 
     return { order, created: true };
   } catch (err: unknown) {
-    // Race: two concurrent deliveries both passed the findOne check above.
-    if ((err as { code?: number }).code === 11000) {
-      const raced = await OrderModel.findOne({
-        storeId: store._id,
-        externalOrderId: normalized.externalOrderId,
-      });
-      if (raced) return { order: raced, created: false };
+    const mongoErr = err as MongoDuplicateKeyError;
+    if (mongoErr.code === 11000) {
+      // Only the storeId+externalOrderId index is part of this schema (see
+      // order.model.ts) — a collision on that key is the expected race of two
+      // concurrent deliveries both passing the findOne check above, safely
+      // resolved by returning the document the other delivery just created.
+      // A collision on any OTHER key pattern means an index exists on the live
+      // collection that this schema doesn't know about (e.g. stale/orphaned from
+      // a prior schema iteration) — that must never be silently swallowed, since
+      // it can block ingestion for reasons this code can't see or fix.
+      const isOwnIndexCollision =
+        mongoErr.keyPattern !== undefined &&
+        "storeId" in mongoErr.keyPattern &&
+        "externalOrderId" in mongoErr.keyPattern;
+
+      if (isOwnIndexCollision) {
+        const raced = await OrderModel.findOne({
+          storeId: store._id,
+          externalOrderId: normalized.externalOrderId,
+        });
+        if (raced) return { order: raced, created: false };
+      } else {
+        logger.error("ingest_order_unexpected_duplicate_key", {
+          operation: "ingest_order",
+          storeId: String(store._id),
+          externalOrderId: normalized.externalOrderId,
+          keyPattern: mongoErr.keyPattern ?? null,
+        });
+      }
     }
     throw err;
   }

@@ -317,6 +317,13 @@ export class ShopifyProvider implements StoreProvider {
   normalizeOrder(rawPayload: unknown): NormalizedOrderInput {
     const payload = rawPayload as ShopifyOrderPayload;
 
+    // externalOrderId is the sole uniqueness/idempotency key for every order this
+    // provider ingests (see order.model.ts's storeId+externalOrderId unique index) —
+    // an order must never be persisted without a real, stable Shopify id.
+    if (payload.id === undefined || payload.id === null || String(payload.id).length === 0) {
+      throw new Error('Shopify order payload is missing a stable order id ("id").');
+    }
+
     const address = payload.shipping_address ?? payload.billing_address;
     const joinedName = [payload.customer?.first_name, payload.customer?.last_name]
       .filter(Boolean)

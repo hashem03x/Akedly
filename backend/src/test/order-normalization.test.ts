@@ -35,6 +35,18 @@ describe("ShopifyProvider.normalizeOrder", () => {
     });
   });
 
+  it("rejects a payload with no stable order id instead of silently coercing it", () => {
+    expect(() =>
+      provider.normalizeOrder({
+        name: "#1042",
+        line_items: [],
+        subtotal_price: "0",
+        total_price: "0",
+        currency: "EGP",
+      })
+    ).toThrow(/missing a stable order id/);
+  });
+
   it("falls back to the customer's name when no address name is present", () => {
     const normalized = provider.normalizeOrder({
       id: 1,
@@ -53,6 +65,17 @@ describe("ShopifyProvider.normalizeOrder", () => {
 
 describe("WooCommerceProvider.normalizeOrder", () => {
   const provider = new WooCommerceProvider();
+
+  it("rejects a payload with no stable order id instead of silently coercing it", () => {
+    expect(() =>
+      provider.normalizeOrder({
+        number: "88",
+        line_items: [],
+        total: "0",
+        currency: "EGP",
+      })
+    ).toThrow(/missing a stable order id/);
+  });
 
   it("maps a WooCommerce order payload into the internal order shape", () => {
     const normalized = provider.normalizeOrder({

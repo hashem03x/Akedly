@@ -85,6 +85,13 @@ export class WooCommerceProvider implements StoreProvider {
   normalizeOrder(rawPayload: unknown): NormalizedOrderInput {
     const payload = rawPayload as WooOrderPayload;
 
+    // externalOrderId is the sole uniqueness/idempotency key for every order this
+    // provider ingests (see order.model.ts's storeId+externalOrderId unique index) —
+    // an order must never be persisted without a real, stable WooCommerce id.
+    if (payload.id === undefined || payload.id === null || String(payload.id).length === 0) {
+      throw new Error('WooCommerce order payload is missing a stable order id ("id").');
+    }
+
     const items = (payload.line_items ?? []).map((item) => ({
       name: item.name ?? "Item",
       quantity: item.quantity ?? 1,

@@ -214,6 +214,25 @@ describe("Shopify orders/create webhook — end-to-end", () => {
     expect(sentCount).toBe(1);
   });
 
+  it("rejects a payload with no Shopify order id without creating an order, and leaves the event retryable", async () => {
+    const store = await createStore();
+    const headers = { domain: store.domain, topic: "orders/create", webhookId: "wh-5007" };
+    const payload = orderPayload(5007);
+    delete (payload as { id?: unknown }).id;
+
+    const res = await postWebhook(app, payload, headers);
+    expect(res.status).toBe(500);
+
+    const order = await OrderModel.findOne({ storeId: store._id });
+    expect(order).toBeNull();
+
+    const event = await WebhookEventModel.findOne({ source: "shopify", idempotencyKey: "wh-5007" });
+    expect(event.status).toBe("failed");
+
+    const sent = await CommunicationModel.countDocuments({ channel: "whatsapp", type: "confirmation_sent" });
+    expect(sent).toBe(0);
+  });
+
   it("acknowledges with 200 and does nothing for a topic other than orders/create", async () => {
     const store = await createStore();
 

@@ -1,7 +1,7 @@
 import { StoreModel } from "../modules/stores/store.model";
 import { MerchantModel } from "../modules/merchants/merchant.model";
 import { OrderModel } from "../modules/orders/order.model";
-import { ingestOrder } from "../modules/orders/order.service";
+import { ingestOrder, listOrdersForMerchant } from "../modules/orders/order.service";
 import { claimWebhookEvent, completeWebhookEvent, failWebhookEvent } from "../modules/webhooks/webhook-event.model";
 import type { NormalizedOrderInput } from "../modules/orders/order.types";
 
@@ -55,6 +55,57 @@ describe("ingestOrder idempotency", () => {
 
     const count = await OrderModel.countDocuments({ externalOrderId: normalizedOrder.externalOrderId });
     expect(count).toBe(2);
+  });
+
+  it("creates a second, distinct order for the same merchant without a spurious duplicate-key collision", async () => {
+    // Regression guard for a production incident where a stale index unrelated to
+    // this schema (merchantId_1_shopifyOrderId_1, not present in order.model.ts)
+    // caused every second order for a merchant to fail with E11000. This proves
+    // the schema's own indexes never do that.
+    const store = await createStore();
+
+    const first = await ingestOrder(store, { ...normalizedOrder, externalOrderId: "9001" });
+    const second = await ingestOrder(store, { ...normalizedOrder, externalOrderId: "9002" });
+
+    expect(first.created).toBe(true);
+    expect(second.created).toBe(true);
+    expect(first.order.id).not.toBe(second.order.id);
+
+    const count = await OrderModel.countDocuments({ merchantId: store.merchantId });
+    expect(count).toBe(2);
+  });
+
+  it("does not silently swallow a duplicate-key error from an index outside this schema", async () => {
+    const store = await createStore();
+
+    const unexpectedError = Object.assign(new Error("E11000 duplicate key error"), {
+      name: "MongoServerError",
+      code: 11000,
+      keyPattern: { merchantId: 1, shopifyOrderId: 1 },
+      keyValue: { merchantId: store.merchantId, shopifyOrderId: null },
+    });
+    const createSpy = jest.spyOn(OrderModel, "create").mockImplementationOnce(() => Promise.reject(unexpectedError));
+
+    await expect(ingestOrder(store, { ...normalizedOrder, externalOrderId: "9003" })).rejects.toThrow(
+      /E11000/
+    );
+
+    // Must not have been misclassified as "the order I'm about to create already
+    // exists" — it doesn't; the collision was on an unrelated key.
+    const count = await OrderModel.countDocuments({ storeId: store._id, externalOrderId: "9003" });
+    expect(count).toBe(0);
+
+    createSpy.mockRestore();
+  });
+
+  it("makes a newly ingested order visible through the merchant order list (dashboard) query", async () => {
+    const store = await createStore();
+    const { order } = await ingestOrder(store, { ...normalizedOrder, externalOrderId: "9004" });
+
+    const { orders, total } = await listOrdersForMerchant(String(store.merchantId), {});
+
+    expect(total).toBe(1);
+    expect(orders.map((o) => o.id)).toContain(order.id);
   });
 });
 
