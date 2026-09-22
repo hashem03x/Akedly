@@ -19,7 +19,23 @@ export const verifyWhatsAppWebhook = (req: Request, res: Response) => {
   const token = req.query["hub.verify_token"];
   const challenge = req.query["hub.challenge"];
 
-  if (mode === "subscribe" && token === env.whatsapp.metaVerifyToken && env.whatsapp.metaVerifyToken) {
+  const configuredToken = env.whatsapp.metaVerifyToken;
+  const tokenReceived = typeof token === "string";
+  const tokensMatch = tokenReceived && token === configuredToken;
+
+  // TEMPORARY diagnostic for the production 403 investigation — booleans and
+  // lengths only, never the token values themselves. Safe to remove once the
+  // mismatch is confirmed fixed.
+  logger.info("WhatsApp webhook GET verification attempt", {
+    hubModeIsSubscribe: mode === "subscribe",
+    verifyTokenConfigured: configuredToken.length > 0,
+    configuredTokenLength: configuredToken.length,
+    tokenReceived,
+    receivedTokenLength: tokenReceived ? (token as string).length : 0,
+    tokensMatch,
+  });
+
+  if (mode === "subscribe" && configuredToken.length > 0 && tokensMatch) {
     res.status(200).send(challenge);
     return;
   }

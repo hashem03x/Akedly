@@ -55,7 +55,10 @@ export const env = {
     provider: process.env.WHATSAPP_PROVIDER ?? (isProduction ? "meta" : "mock"),
     metaAccessToken: process.env.WHATSAPP_META_ACCESS_TOKEN ?? "",
     metaPhoneNumberId: process.env.WHATSAPP_META_PHONE_NUMBER_ID ?? "",
-    metaVerifyToken: process.env.WHATSAPP_META_VERIFY_TOKEN ?? "",
+    // Trimmed defensively: a stray trailing newline/space from copy-pasting into
+    // a dashboard env var field would otherwise silently break the exact-match
+    // comparison against Meta's hub.verify_token during webhook verification.
+    metaVerifyToken: (process.env.WHATSAPP_META_VERIFY_TOKEN ?? "").trim(),
     metaAppSecret: process.env.WHATSAPP_META_APP_SECRET ?? "",
     metaApiVersion: process.env.WHATSAPP_META_API_VERSION ?? "v20.0",
     twilioAccountSid: process.env.WHATSAPP_TWILIO_ACCOUNT_SID ?? "",
