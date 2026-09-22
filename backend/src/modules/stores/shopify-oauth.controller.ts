@@ -20,9 +20,22 @@ function callbackUrl(): string {
   return `${env.backendUrl}/api/v1/integrations/shopify/oauth/callback`;
 }
 
-/** Every failure path here lands the merchant back on the dashboard with a safe, predefined code. */
-function redirectToStoresError(res: Response, code: string) {
-  res.redirect(`${env.frontendUrl}/dashboard/stores?shopify=error&code=${code}`);
+/**
+ * Every failure path here lands the merchant back on the frontend with a safe,
+ * predefined code. Where the merchant is known, the target depends on whether
+ * they've completed onboarding: `/dashboard/stores` is gated by the dashboard's
+ * auth guard on `onboardingCompleted`, which is only set true after a Shopify
+ * connection actually succeeds — redirecting a still-onboarding merchant there
+ * on failure would just get silently bounced back to `/onboarding`, discarding
+ * the error entirely and making a real failure look like the wizard is "stuck".
+ */
+function redirectToStoresError(
+  res: Response,
+  code: string,
+  merchant?: { onboardingCompleted: boolean } | null
+) {
+  const target = merchant && !merchant.onboardingCompleted ? "onboarding" : "dashboard/stores";
+  res.redirect(`${env.frontendUrl}/${target}?shopify=error&code=${code}`);
 }
 
 export const startShopifyOAuth = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
@@ -106,7 +119,7 @@ export const shopifyOAuthCallback = asyncHandler(async (req: Request, res: Respo
       accessToken = exchanged.accessToken;
     } catch (err) {
       logger.error("Shopify OAuth token exchange failed", { shop, message: (err as Error).message });
-      return redirectToStoresError(res, "oauth_exchange_failed");
+      return redirectToStoresError(res, "oauth_exchange_failed", merchant);
     }
 
     try {
@@ -116,7 +129,7 @@ export const shopifyOAuthCallback = asyncHandler(async (req: Request, res: Respo
         shop,
         message: (err as Error).message,
       });
-      return redirectToStoresError(res, "connection_failed");
+      return redirectToStoresError(res, "connection_failed", merchant);
     }
 
     if (!merchant.onboardingCompleted) {

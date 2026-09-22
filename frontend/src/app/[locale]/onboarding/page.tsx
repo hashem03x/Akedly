@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useAuthSession } from "@/hooks/useAuthSession";
 import { StepIndicator } from "@/components/onboarding/StepIndicator";
@@ -18,6 +18,7 @@ export default function OnboardingPage() {
   const t = useTranslations("Onboarding");
   const locale = useLocale();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { merchant, loading } = useAuthSession();
 
   const [step, setStep] = useState<Step>("platform");
@@ -25,6 +26,7 @@ export default function OnboardingPage() {
   const [store, setStore] = useState<Store | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [shopifyOAuthFailed, setShopifyOAuthFailed] = useState(false);
 
   const [autoConfirm, setAutoConfirm] = useState(true);
   const [language, setLanguage] = useState<"ar" | "en">(locale === "ar" ? "ar" : "en");
@@ -32,6 +34,17 @@ export default function OnboardingPage() {
   useEffect(() => {
     if (!loading && !merchant) router.replace(`/${locale}/login`);
   }, [loading, merchant, router, locale]);
+
+  // The Shopify OAuth flow is a full browser redirect away and back — a failure
+  // (e.g. the Shopify Admin API rejecting the connection) lands back here with
+  // ?shopify=error instead of leaving any in-memory wizard state to resume from.
+  useEffect(() => {
+    if (searchParams.get("shopify") === "error") {
+      setPlatform("shopify");
+      setStep("connect");
+      setShopifyOAuthFailed(true);
+    }
+  }, [searchParams]);
 
   if (loading || !merchant) return null;
 
@@ -152,6 +165,12 @@ export default function OnboardingPage() {
               <li>{t("shopify.explain2")}</li>
               <li>{t("shopify.explain3")}</li>
             </ol>
+            {shopifyOAuthFailed && (
+              <div className="mt-4 rounded-md border border-danger/30 bg-danger/10 p-3">
+                <p className="text-sm font-medium text-danger">{t("shopify.oauthErrorTitle")}</p>
+                <p className="mt-1 text-sm text-muted">{t("shopify.oauthErrorBody")}</p>
+              </div>
+            )}
             <div className="mt-5">
               <ConnectShopifyOAuthButton />
             </div>

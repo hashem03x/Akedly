@@ -18,13 +18,15 @@ jest.mock("../integrations/store-providers/shopify-oauth", () => ({
 }));
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const { normalizeShopDomain } = require("../integrations/store-providers/shopify-oauth");
+const { normalizeShopDomain, exchangeShopifyCodeForToken } = require("../integrations/store-providers/shopify-oauth");
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { createApp } = require("../app");
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { MerchantModel } = require("../modules/merchants/merchant.model");
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { ShopifyOAuthStateModel } = require("../modules/stores/shopify-oauth-state.model");
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { StoreModel } = require("../modules/stores/store.model");
 
 describe("normalizeShopDomain", () => {
   it("accepts plain, https-prefixed, and trailing-slash myshopify domains", () => {
@@ -218,4 +220,125 @@ describe("Shopify OAuth callback", () => {
     expect(second.status).toBe(302);
     expect(second.headers.location).toContain("code=state_already_used");
   }, 20000);
+
+  it("redirects a still-onboarding merchant's failure to /onboarding, not /dashboard/stores", async () => {
+    const merchant = await MerchantModel.create({
+      name: "Test Merchant",
+      email: `merchant_${Date.now()}_4@example.com`,
+      passwordHash: "hash",
+      onboardingCompleted: false,
+    });
+    await ShopifyOAuthStateModel.create({
+      state: "onboarding-merchant-state",
+      merchantId: merchant._id,
+      shop: "example.myshopify.com",
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+
+    const url = callbackUrl({ shop: "example.myshopify.com", code: "abc", state: "onboarding-merchant-state" });
+    const res = await request(app).get(url);
+
+    expect(res.status).toBe(302);
+    // exchangeShopifyCodeForToken is mocked to reject, so this hits oauth_exchange_failed —
+    // the point being asserted is WHERE it redirects, not which specific failure code.
+    expect(res.headers.location).toMatch(/^http:\/\/localhost:3000\/onboarding\?/);
+  });
+
+  it("redirects an already-onboarded merchant's failure to /dashboard/stores", async () => {
+    const merchant = await MerchantModel.create({
+      name: "Test Merchant",
+      email: `merchant_${Date.now()}_5@example.com`,
+      passwordHash: "hash",
+      onboardingCompleted: true,
+    });
+    await ShopifyOAuthStateModel.create({
+      state: "onboarded-merchant-state",
+      merchantId: merchant._id,
+      shop: "example.myshopify.com",
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+
+    const url = callbackUrl({ shop: "example.myshopify.com", code: "abc", state: "onboarded-merchant-state" });
+    const res = await request(app).get(url);
+
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toMatch(/^http:\/\/localhost:3000\/dashboard\/stores\?/);
+  });
+
+  it("full happy path: state -> token exchange -> GraphQL testConnection -> store created -> onboarding completed -> redirected to dashboard/stores", async () => {
+    const merchant = await MerchantModel.create({
+      name: "Test Merchant",
+      email: `merchant_${Date.now()}_6@example.com`,
+      passwordHash: "hash",
+      onboardingCompleted: false,
+    });
+    await ShopifyOAuthStateModel.create({
+      state: "happy-path-state",
+      merchantId: merchant._id,
+      shop: "dev-akedly.myshopify.com",
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+
+    // Override the token exchange for just this call; other tests keep the
+    // default rejection so they never depend on network availability.
+    exchangeShopifyCodeForToken.mockResolvedValueOnce({
+      accessToken: "shpat_fake_token",
+      scope: "read_orders,write_orders",
+    });
+
+    const originalFetch = global.fetch;
+    global.fetch = jest.fn(async (_url: string, init: RequestInit) => {
+      const body = JSON.parse((init.body as string) ?? "{}");
+      if (typeof body.query === "string" && body.query.includes("currentAppInstallation")) {
+        return {
+          ok: true,
+          status: 200,
+          headers: { get: () => "application/json" },
+          text: async () =>
+            JSON.stringify({
+              data: {
+                shop: { name: "Dev Akedly" },
+                currentAppInstallation: { accessScopes: [{ handle: "read_orders" }, { handle: "write_orders" }] },
+              },
+            }),
+        };
+      }
+      // webhookSubscriptions list + webhookSubscriptionCreate — both succeed, no existing subscription.
+      if (typeof body.query === "string" && body.query.includes("webhookSubscriptions")) {
+        return {
+          ok: true,
+          status: 200,
+          headers: { get: () => "application/json" },
+          text: async () => JSON.stringify({ data: { webhookSubscriptions: { edges: [] } } }),
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        headers: { get: () => "application/json" },
+        text: async () =>
+          JSON.stringify({
+            data: { webhookSubscriptionCreate: { webhookSubscription: { id: "gid://x/1" }, userErrors: [] } },
+          }),
+      };
+    }) as unknown as typeof fetch;
+
+    try {
+      const url = callbackUrl({ shop: "dev-akedly.myshopify.com", code: "real-code", state: "happy-path-state" });
+      const res = await request(app).get(url);
+
+      expect(res.status).toBe(302);
+      expect(res.headers.location).toMatch(/^http:\/\/localhost:3000\/dashboard\/stores\?shopify=connected/);
+
+      const updatedMerchant = await MerchantModel.findById(merchant._id);
+      expect(updatedMerchant?.onboardingCompleted).toBe(true);
+
+      const store = await StoreModel.findOne({ merchantId: merchant._id, platform: "shopify" });
+      expect(store).not.toBeNull();
+      expect(store?.domain).toBe("dev-akedly.myshopify.com");
+      expect(store?.status).toBe("connected");
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
 });

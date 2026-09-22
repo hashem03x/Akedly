@@ -96,7 +96,9 @@
       "domainHint": "your-store.myshopify.com",
       "domainInvalid": "أدخل نطاق myshopify.com صحيح.",
       "submit": "المتابعة مع Shopify",
-      "oauthRedirectNote": "هيتم تحويلك إلى Shopify لتفويض أكدلي."
+      "oauthRedirectNote": "هيتم تحويلك إلى Shopify لتفويض أكدلي.",
+      "oauthErrorTitle": "لم نتمكن من ربط متجر Shopify الخاص بك.",
+      "oauthErrorBody": "من فضلك حاول مرة أخرى، أو تواصل مع الدعم إذا استمرت المشكلة."
     },
     "woocommerce": {
       "title": "ربط WooCommerce",

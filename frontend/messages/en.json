@@ -96,7 +96,9 @@
       "domainHint": "your-store.myshopify.com",
       "domainInvalid": "Enter a valid myshopify.com domain.",
       "submit": "Continue with Shopify",
-      "oauthRedirectNote": "You'll be redirected to Shopify to authorize Akedly."
+      "oauthRedirectNote": "You'll be redirected to Shopify to authorize Akedly.",
+      "oauthErrorTitle": "We couldn't connect your Shopify store.",
+      "oauthErrorBody": "Please try again, or contact support if the problem continues."
     },
     "woocommerce": {
       "title": "Connect WooCommerce",
