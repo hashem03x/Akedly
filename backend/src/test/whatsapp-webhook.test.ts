@@ -285,6 +285,27 @@ describe("WHATSAPP_META_APP_SECRET not configured", () => {
   });
 });
 
+describe("WHATSAPP_META_VERIFY_TOKEN whitespace handling", () => {
+  it("still matches when the configured token has accidental leading/trailing whitespace", async () => {
+    const previous = process.env.WHATSAPP_META_VERIFY_TOKEN;
+    process.env.WHATSAPP_META_VERIFY_TOKEN = "  test-verify-token\n";
+    jest.resetModules();
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { createApp: createAppPadded } = require("../app");
+    const appPadded = createAppPadded();
+
+    const res = await request(appPadded)
+      .get("/api/v1/webhooks/whatsapp")
+      .query({ "hub.mode": "subscribe", "hub.verify_token": "test-verify-token", "hub.challenge": "chal" });
+
+    expect(res.status).toBe(200);
+    expect(res.text).toBe("chal");
+
+    process.env.WHATSAPP_META_VERIFY_TOKEN = previous;
+    jest.resetModules();
+  });
+});
+
 describe("WhatsAppMetaProvider", () => {
   const originalFetch = global.fetch;
 
