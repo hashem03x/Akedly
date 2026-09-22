@@ -4,11 +4,7 @@ import { ApiError } from "../../utils/api-error";
 import { decryptSecret, encryptSecret } from "../../utils/crypto";
 import { getStoreProvider } from "../../integrations/store-providers";
 import { StoreModel, type StoreDocument, type StorePlatform } from "./store.model";
-import type {
-  ConnectShopifyInput,
-  ConnectWooCommerceInput,
-  UpdateStoreSettingsInput,
-} from "./store.types";
+import type { ConnectWooCommerceInput, UpdateStoreSettingsInput } from "./store.types";
 
 const CREDENTIAL_FIELDS =
   "+credentials.accessToken +credentials.consumerKey +credentials.consumerSecret +credentials.webhookSecret";
@@ -25,25 +21,38 @@ export async function getOwnedStore(merchantId: string, storeId: string): Promis
   return store;
 }
 
-export async function connectShopifyStore(
+/**
+ * Creates or updates the merchant's Shopify store from a completed OAuth exchange.
+ * Reuses the exact same ShopifyProvider (testConnection/registerWebhooks) that the
+ * rest of the app already depends on — OAuth only supplies the access token.
+ *
+ * Reconnecting the same shop (merchant re-authorizes, or the token is refreshed)
+ * updates the existing Store record instead of creating a duplicate, since
+ * (merchantId, platform, domain) is unique.
+ */
+export async function upsertShopifyStoreFromOAuth(
   merchantId: string,
-  input: ConnectShopifyInput
+  shop: string,
+  accessToken: string
 ): Promise<StoreDocument> {
   const provider = getStoreProvider("shopify");
-  const test = await provider.testConnection({ domain: input.domain, accessToken: input.accessToken });
+  const test = await provider.testConnection({ domain: shop, accessToken });
   if (!test.ok) {
     throw ApiError.badRequest("STORE_CONNECTION_FAILED", test.error ?? "Could not connect to Shopify.");
   }
 
-  const store = await StoreModel.create({
-    merchantId,
-    platform: "shopify",
-    name: input.name || test.storeName || input.domain,
-    domain: input.domain,
-    credentials: { accessToken: encryptSecret(input.accessToken) },
-    status: "connected",
-    lastConnectionTestAt: new Date(),
-  });
+  let store = await StoreModel.findOne({ merchantId, platform: "shopify", domain: shop });
+  if (!store) {
+    store = new StoreModel({ merchantId, platform: "shopify", domain: shop, name: test.storeName || shop });
+  } else {
+    store.name = test.storeName || store.name;
+  }
+
+  store.credentials = { accessToken: encryptSecret(accessToken) };
+  store.status = "connected";
+  store.lastConnectionTestAt = new Date();
+  store.lastConnectionError = undefined;
+  await store.save();
 
   await registerStoreWebhooks(store.id);
   return store;
@@ -106,7 +115,7 @@ async function registerStoreWebhooks(storeId: string): Promise<void> {
           ? decryptSecret(store.credentials.consumerSecret)
           : undefined,
       },
-      env.frontendUrl
+      env.backendUrl
     );
   } catch (err) {
     store.status = "error";

@@ -63,7 +63,22 @@ export class ShopifyProvider implements StoreProvider {
   async registerWebhooks(input: StoreConnectionInput, callbackBaseUrl: string): Promise<void> {
     if (!input.accessToken) throw new Error("Missing Shopify access token.");
 
+    const topic = "orders/create";
     const address = `${callbackBaseUrl}/api/v1/webhooks/shopify`;
+
+    // Idempotency: skip creating a new subscription if one already points at this
+    // exact address/topic (e.g. the merchant disconnects and reconnects the store).
+    const listRes = await fetch(
+      adminApiUrl(input.domain, `webhooks.json?address=${encodeURIComponent(address)}&topic=${topic}`),
+      { headers: { "X-Shopify-Access-Token": input.accessToken } }
+    );
+    if (listRes.ok) {
+      const existing = (await listRes.json()) as { webhooks?: unknown[] };
+      if (existing.webhooks && existing.webhooks.length > 0) {
+        return;
+      }
+    }
+
     const res = await fetch(adminApiUrl(input.domain, "webhooks.json"), {
       method: "POST",
       headers: {
@@ -71,7 +86,7 @@ export class ShopifyProvider implements StoreProvider {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        webhook: { topic: "orders/create", address, format: "json" },
+        webhook: { topic, address, format: "json" },
       }),
     });
 

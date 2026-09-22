@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useAuthSession } from "@/hooks/useAuthSession";
 import { StepIndicator } from "@/components/onboarding/StepIndicator";
+import { ConnectShopifyOAuthButton } from "@/components/stores/ConnectStoreForms";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -42,29 +43,6 @@ export default function OnboardingPage() {
     t("steps.done"),
   ];
   const stepIndex = { platform: 0, connect: 1, test: 2, configure: 3, done: 4 }[step];
-
-  async function connectShopify(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    const form = new FormData(e.currentTarget);
-    setSubmitting(true);
-    setError(null);
-    try {
-      const data = await apiFetch<{ store: Store }>("/api/v1/stores/shopify", {
-        method: "POST",
-        body: JSON.stringify({
-          name: form.get("name"),
-          domain: form.get("domain"),
-          accessToken: form.get("accessToken"),
-        }),
-      });
-      setStore(data.store);
-      setStep("test");
-    } catch (err) {
-      setError(err instanceof ApiClientError ? err.message : t("test.failure"));
-    } finally {
-      setSubmitting(false);
-    }
-  }
 
   async function connectWooCommerce(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -167,28 +145,23 @@ export default function OnboardingPage() {
         )}
 
         {step === "connect" && platform === "shopify" && (
-          <form onSubmit={connectShopify}>
+          <div>
             <h2 className="text-base font-medium">{t("shopify.title")}</h2>
             <ol className="mt-3 list-inside list-decimal space-y-1 text-sm text-muted">
               <li>{t("shopify.explain1")}</li>
               <li>{t("shopify.explain2")}</li>
               <li>{t("shopify.explain3")}</li>
             </ol>
-            <div className="mt-5 flex flex-col gap-4">
-              <Input name="name" label={t("shopify.storeName")} required />
-              <Input name="domain" label={t("shopify.domain")} placeholder={t("shopify.domainHint")} required />
-              <Input name="accessToken" label={t("shopify.accessToken")} type="password" required />
+            <div className="mt-5">
+              <ConnectShopifyOAuthButton />
             </div>
-            {error && <p className="mt-3 text-sm text-danger">{error}</p>}
-            <div className="mt-6 flex items-center justify-between">
+            <p className="mt-4 text-xs text-muted">{t("shopify.oauthRedirectNote")}</p>
+            <div className="mt-6">
               <Button type="button" variant="ghost" onClick={() => setStep("platform")}>
                 {t("back")}
               </Button>
-              <Button type="submit" disabled={submitting}>
-                {t("shopify.submit")}
-              </Button>
             </div>
-          </form>
+          </div>
         )}
 
         {step === "connect" && platform === "woocommerce" && (

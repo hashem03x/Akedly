@@ -3,22 +3,15 @@ import type { AuthenticatedRequest } from "../../middleware/auth.middleware";
 import { sendSuccess } from "../../utils/api-response";
 import { toStoreDto } from "./store.dto";
 import * as storeService from "./store.service";
-import {
-  connectShopifyStoreSchema,
-  connectWooCommerceStoreSchema,
-  updateStoreSettingsSchema,
-} from "./store.validation";
+import { connectWooCommerceStoreSchema, updateStoreSettingsSchema } from "./store.validation";
 
 export const listStores = asyncHandler(async (req: AuthenticatedRequest, res) => {
   const stores = await storeService.listStoresForMerchant(req.merchantId!);
   sendSuccess(res, { stores: stores.map(toStoreDto) });
 });
 
-export const connectShopify = asyncHandler(async (req: AuthenticatedRequest, res) => {
-  const input = connectShopifyStoreSchema.parse(req.body);
-  const store = await storeService.connectShopifyStore(req.merchantId!, input);
-  sendSuccess(res, { store: toStoreDto(store) }, 201);
-});
+// Shopify no longer connects through a manually pasted access token — see
+// shopify-oauth.controller.ts for the OAuth start/callback flow that replaces it.
 
 export const connectWooCommerce = asyncHandler(async (req: AuthenticatedRequest, res) => {
   const input = connectWooCommerceStoreSchema.parse(req.body);

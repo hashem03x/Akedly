@@ -82,20 +82,21 @@
     "platform": {
       "title": "متجرك شغال على أي منصة؟",
       "shopify": "Shopify",
-      "shopifyHint": "الربط باستخدام رمز وصول API الخاص بالإدارة.",
+      "shopifyHint": "اربط متجرك بأمان عن طريق Shopify — من غير نسخ أي مفاتيح.",
       "woocommerce": "WooCommerce",
       "woocommerceHint": "الربط باستخدام مفاتيح REST API."
     },
     "shopify": {
       "title": "ربط Shopify",
-      "explain1": "اربط متجر Shopify الخاص بك",
-      "explain2": "امنح أكدلي صلاحية قراءة وتحديث الطلبات",
-      "explain3": "أكدلي يسجل webhook الطلبات تلقائياً",
-      "storeName": "اسم المتجر",
-      "domain": "نطاق المتجر",
-      "domainHint": "مثال: your-store.myshopify.com",
-      "accessToken": "رمز وصول Admin API",
-      "submit": "ربط Shopify"
+      "oauthExplain": "اربط متجر Shopify الخاص بك بأمان عن طريق Shopify.",
+      "explain1": "أدخل نطاق متجرك على Shopify",
+      "explain2": "هيتم تحويلك إلى Shopify لتفويض أكدلي",
+      "explain3": "أكدلي يختبر الاتصال ويسجل webhook الطلبات تلقائياً",
+      "domain": "متجر Shopify",
+      "domainHint": "your-store.myshopify.com",
+      "domainInvalid": "أدخل نطاق myshopify.com صحيح.",
+      "submit": "المتابعة مع Shopify",
+      "oauthRedirectNote": "هيتم تحويلك إلى Shopify لتفويض أكدلي."
     },
     "woocommerce": {
       "title": "ربط WooCommerce",
@@ -206,7 +207,12 @@
     "disconnectConfirmTitle": "فصل هذا المتجر؟",
     "disconnectConfirmBody": "أكدلي هيوقف إرسال التأكيدات للطلبات الجديدة من هذا المتجر.",
     "cancel": "إلغاء",
-    "confirmDisconnect": "فصل المتجر"
+    "confirmDisconnect": "فصل المتجر",
+    "oauth": {
+      "connectedTitle": "تم ربط Shopify بنجاح.",
+      "errorTitle": "لم نتمكن من ربط متجر Shopify الخاص بك.",
+      "errorBody": "من فضلك حاول مرة أخرى."
+    }
   },
   "Settings": {
     "title": "إعدادات التأكيد",

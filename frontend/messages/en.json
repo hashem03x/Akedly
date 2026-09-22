@@ -82,20 +82,21 @@
     "platform": {
       "title": "What platform does your store use?",
       "shopify": "Shopify",
-      "shopifyHint": "Connect using an admin API access token.",
+      "shopifyHint": "Connect securely through Shopify — no API keys to copy.",
       "woocommerce": "WooCommerce",
       "woocommerceHint": "Connect using REST API keys."
     },
     "shopify": {
       "title": "Connect Shopify",
-      "explain1": "Connect your Shopify store",
-      "explain2": "Authorize Akedly to read and update orders",
-      "explain3": "Akedly registers the order webhook automatically",
-      "storeName": "Store name",
-      "domain": "Shop domain",
-      "domainHint": "e.g. your-store.myshopify.com",
-      "accessToken": "Admin API access token",
-      "submit": "Connect Shopify"
+      "oauthExplain": "Connect your Shopify store securely through Shopify.",
+      "explain1": "Enter your Shopify store domain",
+      "explain2": "You'll be redirected to Shopify to authorize Akedly",
+      "explain3": "Akedly tests the connection and registers the order webhook automatically",
+      "domain": "Shopify store",
+      "domainHint": "your-store.myshopify.com",
+      "domainInvalid": "Enter a valid myshopify.com domain.",
+      "submit": "Continue with Shopify",
+      "oauthRedirectNote": "You'll be redirected to Shopify to authorize Akedly."
     },
     "woocommerce": {
       "title": "Connect WooCommerce",
@@ -206,7 +207,12 @@
     "disconnectConfirmTitle": "Disconnect this store?",
     "disconnectConfirmBody": "Akedly will stop sending confirmations for new orders from this store.",
     "cancel": "Cancel",
-    "confirmDisconnect": "Disconnect store"
+    "confirmDisconnect": "Disconnect store",
+    "oauth": {
+      "connectedTitle": "Shopify connected successfully.",
+      "errorTitle": "We couldn't connect your Shopify store.",
+      "errorBody": "Please try again."
+    }
   },
   "Settings": {
     "title": "Confirmation settings",

@@ -6,7 +6,6 @@ const router = Router();
 router.use(requireAuth());
 
 router.get("/", storeController.listStores);
-router.post("/shopify", storeController.connectShopify);
 router.post("/woocommerce", storeController.connectWooCommerce);
 router.get("/:storeId", storeController.getStore);
 router.post("/:storeId/test-connection", storeController.testConnection);

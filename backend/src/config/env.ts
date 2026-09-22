@@ -1,7 +1,11 @@
 import "dotenv/config";
 
 function required(name: string, fallback?: string): string {
-  const value = process.env[name] ?? fallback;
+  // Treat an unset OR blank env var the same way — a `.env` file with `KEY=`
+  // (present but empty) should fall back in development, not silently pass an
+  // empty string through to things like JWT signing.
+  const raw = process.env[name];
+  const value = raw === undefined || raw === "" ? fallback : raw;
   if (value === undefined) {
     throw new Error(`Missing required environment variable: ${name}`);
   }
@@ -22,6 +26,11 @@ export const env = {
   jwtExpiresIn: process.env.JWT_EXPIRES_IN ?? "7d",
 
   frontendUrl: process.env.FRONTEND_URL ?? "http://localhost:3000",
+
+  // Public URL of this backend itself — needed to build redirect/callback URLs
+  // (e.g. the Shopify OAuth callback and webhook delivery addresses) that must
+  // point back to the backend, not the frontend.
+  backendUrl: process.env.BACKEND_URL ?? `http://localhost:${Number(process.env.PORT ?? 4000)}`,
 
   credentialsEncryptionKey: required(
     "CREDENTIALS_ENCRYPTION_KEY",
