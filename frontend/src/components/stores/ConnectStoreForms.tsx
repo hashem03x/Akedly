@@ -6,7 +6,6 @@ import { useLocale, useTranslations } from "next-intl";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 import { apiFetch } from "@/lib/api-client";
-import { API_URL } from "@/lib/config";
 import { ApiClientError, type Store } from "@/lib/api-types";
 
 const SHOP_DOMAIN_REGEX = /^[a-z0-9][a-z0-9-]*\.myshopify\.com$/;
@@ -38,7 +37,7 @@ export function ConnectShopifyOAuthButton() {
       return;
     }
     setError(null);
-    window.location.href = `${API_URL}/api/v1/integrations/shopify/oauth/start?shop=${encodeURIComponent(shop)}`;
+    window.location.href = `/api/v1/integrations/shopify/oauth/start?shop=${encodeURIComponent(shop)}`;
   }
 
   return (

@@ -1,12 +1,17 @@
 "use client";
 
-import { API_URL } from "./config";
 import { ApiClientError, type ApiResponse } from "./api-types";
 
+/**
+ * Calls the frontend's own /api/v1/* route handlers (same-origin), never the
+ * backend directly. The frontend and backend are separately deployed on
+ * different domains, so the session cookie lives here on the frontend's own
+ * origin — see lib/server-auth-cookie.ts for why. Same-origin means cookies
+ * are attached automatically without needing `credentials: "include"`.
+ */
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_URL}${path}`, {
+  const res = await fetch(path, {
     ...init,
-    credentials: "include",
     headers: {
       "Content-Type": "application/json",
       ...init?.headers,
