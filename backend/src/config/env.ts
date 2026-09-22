@@ -29,8 +29,11 @@ export const env = {
 
   // Public URL of this backend itself — needed to build redirect/callback URLs
   // (e.g. the Shopify OAuth callback and webhook delivery addresses) that must
-  // point back to the backend, not the frontend.
-  backendUrl: process.env.BACKEND_URL ?? `http://localhost:${Number(process.env.PORT ?? 4000)}`,
+  // point back to the backend, not the frontend. Required in production: if it's
+  // missing there, we'd otherwise silently build callback URLs pointing at
+  // localhost, which is exactly the kind of bug that should fail loudly at boot
+  // instead of quietly breaking every merchant's Shopify connection.
+  backendUrl: required("BACKEND_URL", isProduction ? undefined : `http://localhost:${Number(process.env.PORT ?? 4000)}`),
 
   credentialsEncryptionKey: required(
     "CREDENTIALS_ENCRYPTION_KEY",
@@ -54,6 +57,7 @@ export const env = {
     metaPhoneNumberId: process.env.WHATSAPP_META_PHONE_NUMBER_ID ?? "",
     metaVerifyToken: process.env.WHATSAPP_META_VERIFY_TOKEN ?? "",
     metaAppSecret: process.env.WHATSAPP_META_APP_SECRET ?? "",
+    metaApiVersion: process.env.WHATSAPP_META_API_VERSION ?? "v20.0",
     twilioAccountSid: process.env.WHATSAPP_TWILIO_ACCOUNT_SID ?? "",
     twilioAuthToken: process.env.WHATSAPP_TWILIO_AUTH_TOKEN ?? "",
     twilioFromNumber: process.env.WHATSAPP_TWILIO_FROM_NUMBER ?? "",

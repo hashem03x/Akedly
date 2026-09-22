@@ -12,10 +12,27 @@ export interface OrderConfirmationMessageInput {
   currency: string;
 }
 
+/** Normalized provider API error — never contains tokens/secrets. */
+export interface ProviderApiErrorInfo {
+  httpStatus?: number;
+  code?: string | number;
+  type?: string;
+  message: string;
+}
+
 export interface SendMessageResult {
   success: boolean;
   providerMessageId?: string;
   error?: string;
+  errorDetails?: ProviderApiErrorInfo;
+}
+
+export interface SendTemplateMessageInput {
+  toPhone: string;
+  /** e.g. "hello_world" for Meta's built-in test template. */
+  templateName: string;
+  /** e.g. "en_US". */
+  languageCode: string;
 }
 
 /**
@@ -36,4 +53,7 @@ export interface InboundConfirmationReply {
 export interface WhatsAppProvider {
   readonly name: string;
   sendOrderConfirmation(input: OrderConfirmationMessageInput): Promise<SendMessageResult>;
+  /** Generic template send — used for Meta's `hello_world` connectivity test today,
+   *  and reusable for future Akedly-approved templates without a new provider method. */
+  sendTemplateMessage(input: SendTemplateMessageInput): Promise<SendMessageResult>;
 }

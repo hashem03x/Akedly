@@ -3,9 +3,35 @@ import { logger } from "../../utils/logger";
 import { buildOrderConfirmationMessage } from "./message-templates";
 import type {
   OrderConfirmationMessageInput,
+  ProviderApiErrorInfo,
   SendMessageResult,
+  SendTemplateMessageInput,
   WhatsAppProvider,
 } from "./whatsapp-provider.interface";
+
+interface MetaErrorBody {
+  error?: {
+    message?: string;
+    type?: string;
+    code?: number;
+    error_subcode?: number;
+    fbtrace_id?: string;
+  };
+}
+
+function messagesUrl(): string {
+  return `https://graph.facebook.com/${env.whatsapp.metaApiVersion}/${env.whatsapp.metaPhoneNumberId}/messages`;
+}
+
+/** Normalizes a Meta Graph API error response. Never includes the access token. */
+function parseMetaError(httpStatus: number, body: MetaErrorBody): ProviderApiErrorInfo {
+  return {
+    httpStatus,
+    code: body.error?.code,
+    type: body.error?.type,
+    message: body.error?.message ?? `Meta API responded with HTTP ${httpStatus}.`,
+  };
+}
 
 /**
  * Meta WhatsApp Business Platform (Cloud API) provider.
@@ -24,40 +50,61 @@ export class WhatsAppMetaProvider implements WhatsAppProvider {
     }
 
     const message = buildOrderConfirmationMessage(input);
-    const url = `https://graph.facebook.com/${"v20.0"}/${env.whatsapp.metaPhoneNumberId}/messages`;
 
+    return this.send({
+      messaging_product: "whatsapp",
+      to: input.toPhone,
+      type: "interactive",
+      interactive: {
+        type: "button",
+        body: { text: message.body },
+        action: {
+          buttons: message.buttons.map((button) => ({
+            type: "reply",
+            reply: { id: `${button.id}:${input.orderId}`, title: button.title },
+          })),
+        },
+      },
+    });
+  }
+
+  async sendTemplateMessage(input: SendTemplateMessageInput): Promise<SendMessageResult> {
+    if (!env.whatsapp.metaAccessToken || !env.whatsapp.metaPhoneNumberId) {
+      return { success: false, error: "WhatsApp Meta credentials are not configured." };
+    }
+
+    return this.send({
+      messaging_product: "whatsapp",
+      to: input.toPhone,
+      type: "template",
+      template: {
+        name: input.templateName,
+        language: { code: input.languageCode },
+      },
+    });
+  }
+
+  private async send(payload: Record<string, unknown>): Promise<SendMessageResult> {
     try {
-      const res = await fetch(url, {
+      const res = await fetch(messagesUrl(), {
         method: "POST",
         headers: {
           Authorization: `Bearer ${env.whatsapp.metaAccessToken}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          messaging_product: "whatsapp",
-          to: input.toPhone,
-          type: "interactive",
-          interactive: {
-            type: "button",
-            body: { text: message.body },
-            action: {
-              buttons: message.buttons.map((button) => ({
-                type: "reply",
-                reply: { id: `${button.id}:${input.orderId}`, title: button.title },
-              })),
-            },
-          },
-        }),
+        body: JSON.stringify(payload),
       });
 
-      const body = (await res.json()) as {
-        messages?: { id?: string }[];
-        error?: { message?: string };
-      };
+      const body = (await res.json()) as MetaErrorBody & { messages?: { id?: string }[] };
 
       if (!res.ok) {
-        logger.error("WhatsApp Meta send failed", { status: res.status, error: body.error });
-        return { success: false, error: body.error?.message ?? `HTTP ${res.status}` };
+        const errorDetails = parseMetaError(res.status, body);
+        logger.error("WhatsApp Meta send failed", {
+          status: res.status,
+          code: errorDetails.code,
+          type: errorDetails.type,
+        });
+        return { success: false, error: errorDetails.message, errorDetails };
       }
 
       return { success: true, providerMessageId: body.messages?.[0]?.id };

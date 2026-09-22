@@ -5,6 +5,7 @@ import { buildOrderConfirmationMessage } from "./message-templates";
 import type {
   OrderConfirmationMessageInput,
   SendMessageResult,
+  SendTemplateMessageInput,
   WhatsAppProvider,
 } from "./whatsapp-provider.interface";
 
@@ -26,6 +27,18 @@ export class WhatsAppMockProvider implements WhatsAppProvider {
       orderNumber: input.orderNumber,
       body: message.body,
       buttons: message.buttons.map((b) => b.title),
+      providerMessageId,
+    });
+
+    return { success: true, providerMessageId };
+  }
+
+  async sendTemplateMessage(input: SendTemplateMessageInput): Promise<SendMessageResult> {
+    const providerMessageId = `mock_${crypto.randomUUID()}`;
+
+    logger.info(`[MOCK WHATSAPP] Template "${input.templateName}" sent to ${maskPhone(input.toPhone)}`, {
+      templateName: input.templateName,
+      languageCode: input.languageCode,
       providerMessageId,
     });
 

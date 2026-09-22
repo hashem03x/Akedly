@@ -5,9 +5,11 @@ import { env } from "../../config/env";
 import { asyncHandler } from "../../middleware/error.middleware";
 import { sendError, sendSuccess } from "../../utils/api-response";
 import { logger } from "../../utils/logger";
+import { maskPhone } from "../../utils/mask";
 import { ApiError } from "../../utils/api-error";
 import { OrderModel } from "../orders/order.model";
-import { recordCommunication } from "../communications/communication.service";
+import type { CommunicationDocument } from "../communications/communication.model";
+import { recordCommunication, updateCommunicationStatusByProviderMessageId } from "../communications/communication.service";
 import { confirmOrder, cancelOrder } from "../confirmations/confirmation.service";
 import { claimWebhookEvent } from "./webhook-event.model";
 
@@ -29,12 +31,63 @@ interface MetaButtonReply {
   title?: string;
 }
 
+interface MetaMessage {
+  id: string;
+  from?: string;
+  type?: string;
+  text?: { body?: string };
+  interactive?: { button_reply?: MetaButtonReply };
+}
+
+interface MetaStatusError {
+  code?: number;
+  title?: string;
+}
+
+interface MetaStatus {
+  id: string;
+  status?: string;
+  timestamp?: string;
+  recipient_id?: string;
+  errors?: MetaStatusError[];
+}
+
+interface MetaChangeValue {
+  metadata?: { phone_number_id?: string };
+  messages?: MetaMessage[];
+  statuses?: MetaStatus[];
+}
+
 interface MetaWebhookEntry {
-  changes?: {
-    value?: {
-      messages?: { id?: string; from?: string; interactive?: { button_reply?: MetaButtonReply } }[];
-    };
-  }[];
+  changes?: { field?: string; value?: MetaChangeValue }[];
+}
+
+interface MetaWebhookPayload {
+  entry?: MetaWebhookEntry[];
+}
+
+const VALID_STATUS_VALUES = new Set(["sent", "delivered", "read", "failed"]);
+
+/**
+ * Flattens a Meta webhook payload into the messages/statuses it carries.
+ * Deliberately defensive: any missing/unexpected shape (a field we don't
+ * subscribe to, a batch with no changes, etc.) just yields empty arrays
+ * instead of throwing — unknown event types must be safely acknowledged.
+ */
+export function parseWhatsAppWebhookPayload(payload: MetaWebhookPayload): {
+  messages: MetaMessage[];
+  statuses: MetaStatus[];
+} {
+  const entries = Array.isArray(payload?.entry) ? payload.entry : [];
+  const values = entries
+    .flatMap((entry) => (Array.isArray(entry?.changes) ? entry.changes : []))
+    .map((change) => change?.value)
+    .filter((value): value is MetaChangeValue => Boolean(value));
+
+  return {
+    messages: values.flatMap((value) => (Array.isArray(value.messages) ? value.messages : [])),
+    statuses: values.flatMap((value) => (Array.isArray(value.statuses) ? value.statuses : [])),
+  };
 }
 
 function parseButtonId(buttonId: string): { action: "confirm" | "cancel" | null; orderId: string | null } {
@@ -43,41 +96,98 @@ function parseButtonId(buttonId: string): { action: "confirm" | "cancel" | null;
   return { action, orderId: orderId ?? null };
 }
 
+function safeEqual(a: string, b: string): boolean {
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  if (bufA.length !== bufB.length) return false;
+  return crypto.timingSafeEqual(bufA, bufB);
+}
+
 export const handleWhatsAppWebhook = asyncHandler(async (req: Request, res: Response) => {
   const rawBody = req.body as Buffer;
 
-  if (env.whatsapp.metaAppSecret) {
-    const signature = req.header("x-hub-signature-256");
-    const computed =
-      "sha256=" + crypto.createHmac("sha256", env.whatsapp.metaAppSecret).update(rawBody).digest("hex");
-    if (!signature || !safeEqual(signature, computed)) {
-      return sendError(res, 401, "INVALID_SIGNATURE", "Webhook signature verification failed.");
+  // Signature verification is mandatory, not best-effort: a missing app secret
+  // is a deployment misconfiguration, not an excuse to accept unverified requests.
+  if (!env.whatsapp.metaAppSecret) {
+    logger.error("WHATSAPP_META_APP_SECRET is not configured; rejecting webhook.");
+    return sendError(res, 500, "WEBHOOK_NOT_CONFIGURED", "WhatsApp webhook verification is not configured.");
+  }
+
+  const signature = req.header("x-hub-signature-256");
+  const computed =
+    "sha256=" + crypto.createHmac("sha256", env.whatsapp.metaAppSecret).update(rawBody).digest("hex");
+  if (!signature || !safeEqual(signature, computed)) {
+    return sendError(res, 401, "INVALID_SIGNATURE", "Webhook signature verification failed.");
+  }
+
+  let payload: MetaWebhookPayload;
+  try {
+    payload = JSON.parse(rawBody.toString("utf8"));
+  } catch {
+    return sendError(res, 400, "MALFORMED_PAYLOAD", "Webhook payload was not valid JSON.");
+  }
+
+  const { messages, statuses } = parseWhatsAppWebhookPayload(payload);
+
+  // Vercel serverless functions can stop executing shortly after the response
+  // is sent — there's no background worker here to finish the job — so
+  // processing is awaited before acknowledging rather than fired-and-forgotten
+  // after responding. Per-item failures are caught and logged individually so
+  // one bad item can't take the whole batch down or block the 200.
+  for (const message of messages) {
+    try {
+      await processInboundMessage(message);
+    } catch (err) {
+      logger.error("Failed to process WhatsApp inbound message", {
+        messageId: message.id,
+        message: (err as Error).message,
+      });
     }
   }
 
-  const payload = JSON.parse(rawBody.toString("utf8")) as { entry?: MetaWebhookEntry[] };
-  const messages = (payload.entry ?? [])
-    .flatMap((entry) => entry.changes ?? [])
-    .flatMap((change) => change.value?.messages ?? []);
-
-  for (const message of messages) {
-    await processInboundMessage(message.id, message.interactive?.button_reply);
+  for (const status of statuses) {
+    try {
+      await processStatusUpdate(status);
+    } catch (err) {
+      logger.error("Failed to process WhatsApp status update", {
+        statusMessageId: status.id,
+        message: (err as Error).message,
+      });
+    }
   }
 
-  // Always 200 quickly so Meta doesn't retry; per-message failures are logged, not surfaced.
-  sendSuccess(res, { received: messages.length });
+  sendSuccess(res, { messages: messages.length, statuses: statuses.length });
 });
 
-async function processInboundMessage(
-  providerMessageId: string | undefined,
-  buttonReply: MetaButtonReply | undefined
-): Promise<void> {
-  if (!buttonReply) return;
+async function processInboundMessage(message: MetaMessage): Promise<void> {
+  if (!message.id) return;
 
-  const idempotencyKey = providerMessageId ?? `${buttonReply.id}:${Date.now()}`;
-  const isNewDelivery = await claimWebhookEvent("whatsapp", idempotencyKey);
+  const isNewDelivery = await claimWebhookEvent("whatsapp", message.id);
   if (!isNewDelivery) return;
 
+  const buttonReply = message.interactive?.button_reply;
+  if (buttonReply) {
+    await processButtonReply(buttonReply, message.id);
+    return;
+  }
+
+  if (message.type === "text") {
+    // V1 is a button-only confirmation flow — free-text replies aren't tied to
+    // an order, so they're just logged for visibility, not acted on.
+    logger.info("WhatsApp webhook: received text message", {
+      from: message.from ? maskPhone(message.from) : undefined,
+      messageId: message.id,
+    });
+    return;
+  }
+
+  logger.info("WhatsApp webhook: received unhandled message type", {
+    type: message.type ?? "unknown",
+    messageId: message.id,
+  });
+}
+
+async function processButtonReply(buttonReply: MetaButtonReply, providerMessageId: string): Promise<void> {
   const { action, orderId } = parseButtonId(buttonReply.id);
   if (!action || !orderId) {
     logger.warn("WhatsApp webhook: unrecognized button payload", { buttonId: buttonReply.id });
@@ -123,11 +233,33 @@ async function processInboundMessage(
   }
 }
 
-function safeEqual(a: string, b: string): boolean {
-  const bufA = Buffer.from(a);
-  const bufB = Buffer.from(b);
-  if (bufA.length !== bufB.length) return false;
-  return crypto.timingSafeEqual(bufA, bufB);
+async function processStatusUpdate(status: MetaStatus): Promise<void> {
+  if (!status.id || !status.status) return;
+
+  if (!VALID_STATUS_VALUES.has(status.status)) {
+    logger.info("WhatsApp webhook: unhandled status value", { status: status.status, messageId: status.id });
+    return;
+  }
+
+  const idempotencyKey = `${status.id}:${status.status}`;
+  const isNewDelivery = await claimWebhookEvent("whatsapp", idempotencyKey);
+  if (!isNewDelivery) return;
+
+  const metadata =
+    status.status === "failed" && status.errors?.length ? { errors: status.errors } : undefined;
+
+  const updated = await updateCommunicationStatusByProviderMessageId(
+    status.id,
+    status.status as CommunicationDocument["status"],
+    metadata
+  );
+
+  if (!updated) {
+    // Not an error — this instance may not have the outbound record (e.g. sent
+    // via a different Akedly deployment/account), or it's for a message we
+    // sent outside the confirmation flow.
+    logger.info("WhatsApp webhook: status update for unknown message id", { messageId: status.id });
+  }
 }
 
 const simulateSchema = z.object({
@@ -146,8 +278,10 @@ export const simulateWhatsAppReply = asyncHandler(async (req: Request, res: Resp
   }
 
   const input = simulateSchema.parse(req.body);
-  await processInboundMessage(`sim_${crypto.randomUUID()}`, {
-    id: `${input.action}:${input.orderId}`,
+  await processInboundMessage({
+    id: `sim_${crypto.randomUUID()}`,
+    type: "interactive",
+    interactive: { button_reply: { id: `${input.action}:${input.orderId}` } },
   });
 
   const order = await OrderModel.findById(input.orderId);
