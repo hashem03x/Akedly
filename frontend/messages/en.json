@@ -1,0 +1,243 @@
+{
+  "Landing": {
+    "nav": { "howItWorks": "How it works", "login": "Log in", "getStarted": "Get Started" },
+    "hero": {
+      "eyebrow": "For Shopify & WooCommerce merchants",
+      "title": "Confirm orders automatically before you ship them.",
+      "subtitle": "Akedly messages every new order on WhatsApp and asks the customer to confirm or cancel — so you stop packing orders nobody wants.",
+      "ctaPrimary": "Get Started",
+      "ctaSecondary": "See How It Works"
+    },
+    "logos": "Built for stores running on",
+    "howItWorks": {
+      "title": "How it works",
+      "subtitle": "Four steps, no manual follow-up calls.",
+      "step1Title": "Order comes in",
+      "step1Body": "A customer checks out on your Shopify or WooCommerce store.",
+      "step2Title": "Akedly sends WhatsApp",
+      "step2Body": "The customer gets order details with two buttons: Confirm or Cancel.",
+      "step3Title": "Customer responds",
+      "step3Body": "One tap. No app to install, no phone call to answer.",
+      "step4Title": "Your store updates",
+      "step4Body": "Akedly records the result and syncs it back to your store."
+    },
+    "why": {
+      "title": "Why merchants add Akedly",
+      "item1Title": "Fewer failed deliveries",
+      "item1Body": "Confirm intent before a courier is on the way, not after.",
+      "item2Title": "No call center needed",
+      "item2Body": "Replace manual confirmation calls with a message customers already read.",
+      "item3Title": "A full paper trail",
+      "item3Body": "Every message sent and every reply received, timestamped per order."
+    },
+    "cta": {
+      "title": "Stop shipping orders that were never going to be accepted.",
+      "button": "Get Started"
+    },
+    "footer": {
+      "tagline": "Order confirmation for e-commerce.",
+      "product": "Product",
+      "howItWorks": "How it works",
+      "login": "Log in",
+      "legal": "© {year} Akedly"
+    }
+  },
+  "Auth": {
+    "login": {
+      "title": "Log in to Akedly",
+      "subtitle": "Enter your details to access your dashboard.",
+      "submit": "Log in",
+      "switchPrompt": "Don't have an account?",
+      "switchLink": "Create one"
+    },
+    "register": {
+      "title": "Create your Akedly account",
+      "subtitle": "Start confirming orders in a few minutes.",
+      "submit": "Create account",
+      "switchPrompt": "Already have an account?",
+      "switchLink": "Log in"
+    },
+    "fields": {
+      "name": "Full name",
+      "email": "Email address",
+      "password": "Password",
+      "passwordHint": "At least 8 characters."
+    },
+    "errors": {
+      "EMAIL_IN_USE": "An account with this email already exists.",
+      "INVALID_CREDENTIALS": "Invalid email or password.",
+      "VALIDATION_ERROR": "Please check the fields below.",
+      "UNKNOWN_ERROR": "Something went wrong. Please try again."
+    }
+  },
+  "Onboarding": {
+    "welcome": { "title": "Welcome to Akedly", "subtitle": "Let's connect your store." },
+    "steps": {
+      "platform": "Choose platform",
+      "connect": "Connect store",
+      "test": "Test connection",
+      "configure": "Configure confirmation",
+      "done": "Done"
+    },
+    "platform": {
+      "title": "What platform does your store use?",
+      "shopify": "Shopify",
+      "shopifyHint": "Connect using an admin API access token.",
+      "woocommerce": "WooCommerce",
+      "woocommerceHint": "Connect using REST API keys."
+    },
+    "shopify": {
+      "title": "Connect Shopify",
+      "explain1": "Connect your Shopify store",
+      "explain2": "Authorize Akedly to read and update orders",
+      "explain3": "Akedly registers the order webhook automatically",
+      "storeName": "Store name",
+      "domain": "Shop domain",
+      "domainHint": "e.g. your-store.myshopify.com",
+      "accessToken": "Admin API access token",
+      "submit": "Connect Shopify"
+    },
+    "woocommerce": {
+      "title": "Connect WooCommerce",
+      "explain1": "Enter your store URL",
+      "explain2": "Enter your WooCommerce REST API keys",
+      "explain3": "Akedly registers the order webhook automatically",
+      "storeName": "Store name",
+      "domain": "Store URL",
+      "domainHint": "e.g. your-store.com",
+      "consumerKey": "Consumer key",
+      "consumerSecret": "Consumer secret",
+      "submit": "Connect WooCommerce"
+    },
+    "test": {
+      "title": "Test connection",
+      "subtitle": "Akedly is checking that your store credentials work.",
+      "success": "Connection successful.",
+      "failure": "Connection failed.",
+      "retry": "Test again",
+      "continue": "Continue"
+    },
+    "configure": {
+      "title": "Configure confirmation",
+      "autoConfirm": "Send confirmations automatically",
+      "channel": "Confirmation channel",
+      "language": "Message language",
+      "arabic": "Arabic",
+      "english": "English",
+      "continue": "Continue"
+    },
+    "done": {
+      "title": "You're ready",
+      "subtitle": "Akedly will confirm every new order automatically from now on.",
+      "cta": "Go to dashboard"
+    },
+    "back": "Back"
+  },
+  "Nav": {
+    "overview": "Overview",
+    "orders": "Orders",
+    "stores": "Stores",
+    "confirmation": "Confirmation",
+    "activity": "Activity",
+    "settings": "Settings",
+    "logout": "Log out"
+  },
+  "Overview": {
+    "title": "Overview",
+    "ordersToday": "Orders today",
+    "pending": "Pending confirmation",
+    "confirmed": "Confirmed",
+    "cancelled": "Cancelled",
+    "confirmationRate": "Confirmation rate",
+    "recentOrders": "Recent orders",
+    "viewAll": "View all",
+    "empty": "No orders yet. Once your store sends its first order, it will show up here."
+  },
+  "Orders": {
+    "title": "Orders",
+    "searchPlaceholder": "Search by order number, customer, or phone",
+    "filters": { "all": "All", "pending": "Pending", "confirmed": "Confirmed", "cancelled": "Cancelled" },
+    "table": {
+      "order": "Order",
+      "customer": "Customer",
+      "store": "Store",
+      "total": "Total",
+      "status": "Status",
+      "channel": "Channel",
+      "time": "Time"
+    },
+    "empty": "No orders match this filter.",
+    "detail": {
+      "back": "Back to orders",
+      "customer": "Customer",
+      "items": "Items",
+      "total": "Total",
+      "confirmation": "Confirmation",
+      "channel": "Channel",
+      "store": "Store",
+      "timeline": "Communication history",
+      "resend": "Resend confirmation",
+      "markConfirmed": "Mark as confirmed",
+      "markCancelled": "Mark as cancelled",
+      "noChannel": "Not sent yet"
+    },
+    "status": { "pending": "Pending", "confirmed": "Confirmed", "cancelled": "Cancelled", "expired": "Expired" },
+    "events": {
+      "order_received": "Order received",
+      "confirmation_sent": "Confirmation sent",
+      "confirmation_response_confirmed": "Customer confirmed",
+      "confirmation_response_cancelled": "Customer cancelled",
+      "confirmation_response_invalid": "Reply ignored (order already closed)",
+      "confirmation_failed": "Confirmation message failed to send",
+      "order_expired": "Order expired",
+      "store_synced": "Store updated",
+      "store_sync_failed": "Store update failed"
+    }
+  },
+  "Stores": {
+    "title": "Stores",
+    "connectShopify": "Connect Shopify",
+    "connectWooCommerce": "Connect WooCommerce",
+    "configure": "Configure",
+    "testConnection": "Test Connection",
+    "disconnect": "Disconnect",
+    "status": { "connected": "Connected", "disconnected": "Disconnected", "error": "Connection error" },
+    "empty": "No stores connected yet.",
+    "disconnectConfirmTitle": "Disconnect this store?",
+    "disconnectConfirmBody": "Akedly will stop sending confirmations for new orders from this store.",
+    "cancel": "Cancel",
+    "confirmDisconnect": "Disconnect store"
+  },
+  "Settings": {
+    "title": "Confirmation settings",
+    "subtitle": "Choose how Akedly confirms new orders for each store.",
+    "autoConfirm": "Send confirmations automatically",
+    "autoConfirmHint": "When off, orders stay pending until you send a confirmation manually.",
+    "channel": "Confirmation channel",
+    "channelWhatsapp": "WhatsApp",
+    "channelPhoneSoon": "Phone (coming soon)",
+    "channelBothSoon": "WhatsApp → Phone (coming soon)",
+    "language": "Message language",
+    "arabic": "Arabic",
+    "english": "English",
+    "save": "Save changes",
+    "saved": "Settings saved."
+  },
+  "Account": {
+    "title": "Account",
+    "name": "Name",
+    "email": "Email",
+    "plan": "Plan"
+  },
+  "Activity": {
+    "title": "Activity",
+    "subtitle": "Every message sent and every reply received, across all your stores.",
+    "empty": "No activity yet."
+  },
+  "Common": {
+    "loading": "Loading…",
+    "error": "Something went wrong.",
+    "retry": "Try again",
+    "language": "Language"
+  }
+}

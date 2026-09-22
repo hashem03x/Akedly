@@ -1,0 +1,243 @@
+{
+  "Landing": {
+    "nav": { "howItWorks": "كيف يعمل", "login": "تسجيل الدخول", "getStarted": "ابدأ الآن" },
+    "hero": {
+      "eyebrow": "لأصحاب متاجر Shopify و WooCommerce",
+      "title": "أكّد الطلبات تلقائياً قبل ما تشحنها.",
+      "subtitle": "أكدلي يرسل رسالة واتساب لكل طلب جديد ويطلب من العميل يأكد أو يلغي الطلب — عشان تبطل تجهّز طلبات محدش هيستلمها.",
+      "ctaPrimary": "ابدأ الآن",
+      "ctaSecondary": "شوف كيف يعمل"
+    },
+    "logos": "لمتاجر تعمل على",
+    "howItWorks": {
+      "title": "كيف يعمل",
+      "subtitle": "أربع خطوات، من غير مكالمات متابعة يدوية.",
+      "step1Title": "يوصل طلب جديد",
+      "step1Body": "العميل بيكمل الشراء من متجرك على Shopify أو WooCommerce.",
+      "step2Title": "أكدلي يبعت واتساب",
+      "step2Body": "العميل بياخد تفاصيل الطلب مع زرين: تأكيد أو إلغاء.",
+      "step3Title": "العميل بيرد",
+      "step3Body": "ضغطة واحدة. من غير تحميل تطبيق أو الرد على مكالمة.",
+      "step4Title": "متجرك بيتحدّث",
+      "step4Body": "أكدلي بيسجل النتيجة ويحدّثها في متجرك."
+    },
+    "why": {
+      "title": "ليه التجار بيستخدموا أكدلي",
+      "item1Title": "شحنات مرتجعة أقل",
+      "item1Body": "تأكد من نية العميل قبل ما تدخل الشحنة مع شركة الشحن، مش بعدها.",
+      "item2Title": "من غير سنتر اتصالات",
+      "item2Body": "استبدل مكالمات التأكيد اليدوية برسالة العميل بيقرأها فعلاً.",
+      "item3Title": "سجل كامل لكل حاجة",
+      "item3Body": "كل رسالة اتبعتت وكل رد وصل، بتوقيت لكل طلب."
+    },
+    "cta": {
+      "title": "بطّل تشحن طلبات ماكانتش هتتقبل من الأساس.",
+      "button": "ابدأ الآن"
+    },
+    "footer": {
+      "tagline": "تأكيد الطلبات للمتاجر الإلكترونية.",
+      "product": "المنتج",
+      "howItWorks": "كيف يعمل",
+      "login": "تسجيل الدخول",
+      "legal": "© {year} أكدلي"
+    }
+  },
+  "Auth": {
+    "login": {
+      "title": "تسجيل الدخول إلى أكدلي",
+      "subtitle": "أدخل بياناتك للوصول إلى لوحة التحكم.",
+      "submit": "تسجيل الدخول",
+      "switchPrompt": "مالكش حساب؟",
+      "switchLink": "أنشئ حساب"
+    },
+    "register": {
+      "title": "أنشئ حساب أكدلي",
+      "subtitle": "ابدأ تأكيد الطلبات في دقائق.",
+      "submit": "إنشاء الحساب",
+      "switchPrompt": "عندك حساب بالفعل؟",
+      "switchLink": "تسجيل الدخول"
+    },
+    "fields": {
+      "name": "الاسم الكامل",
+      "email": "البريد الإلكتروني",
+      "password": "كلمة المرور",
+      "passwordHint": "٨ أحرف على الأقل."
+    },
+    "errors": {
+      "EMAIL_IN_USE": "يوجد حساب مسجل بهذا البريد الإلكتروني بالفعل.",
+      "INVALID_CREDENTIALS": "البريد الإلكتروني أو كلمة المرور غير صحيحة.",
+      "VALIDATION_ERROR": "من فضلك راجع الحقول أدناه.",
+      "UNKNOWN_ERROR": "حدث خطأ ما. حاول مرة أخرى."
+    }
+  },
+  "Onboarding": {
+    "welcome": { "title": "أهلاً بك في أكدلي", "subtitle": "خلينا نربط متجرك." },
+    "steps": {
+      "platform": "اختر المنصة",
+      "connect": "ربط المتجر",
+      "test": "اختبار الاتصال",
+      "configure": "إعداد التأكيد",
+      "done": "تم"
+    },
+    "platform": {
+      "title": "متجرك شغال على أي منصة؟",
+      "shopify": "Shopify",
+      "shopifyHint": "الربط باستخدام رمز وصول API الخاص بالإدارة.",
+      "woocommerce": "WooCommerce",
+      "woocommerceHint": "الربط باستخدام مفاتيح REST API."
+    },
+    "shopify": {
+      "title": "ربط Shopify",
+      "explain1": "اربط متجر Shopify الخاص بك",
+      "explain2": "امنح أكدلي صلاحية قراءة وتحديث الطلبات",
+      "explain3": "أكدلي يسجل webhook الطلبات تلقائياً",
+      "storeName": "اسم المتجر",
+      "domain": "نطاق المتجر",
+      "domainHint": "مثال: your-store.myshopify.com",
+      "accessToken": "رمز وصول Admin API",
+      "submit": "ربط Shopify"
+    },
+    "woocommerce": {
+      "title": "ربط WooCommerce",
+      "explain1": "أدخل رابط متجرك",
+      "explain2": "أدخل مفاتيح WooCommerce REST API",
+      "explain3": "أكدلي يسجل webhook الطلبات تلقائياً",
+      "storeName": "اسم المتجر",
+      "domain": "رابط المتجر",
+      "domainHint": "مثال: your-store.com",
+      "consumerKey": "Consumer Key",
+      "consumerSecret": "Consumer Secret",
+      "submit": "ربط WooCommerce"
+    },
+    "test": {
+      "title": "اختبار الاتصال",
+      "subtitle": "أكدلي بيتأكد إن بيانات متجرك شغالة.",
+      "success": "تم الاتصال بنجاح.",
+      "failure": "فشل الاتصال.",
+      "retry": "إعادة المحاولة",
+      "continue": "متابعة"
+    },
+    "configure": {
+      "title": "إعداد التأكيد",
+      "autoConfirm": "إرسال التأكيدات تلقائياً",
+      "channel": "قناة التأكيد",
+      "language": "لغة الرسالة",
+      "arabic": "العربية",
+      "english": "الإنجليزية",
+      "continue": "متابعة"
+    },
+    "done": {
+      "title": "كل حاجة جاهزة",
+      "subtitle": "أكدلي هيأكد كل طلب جديد تلقائياً من دلوقتي.",
+      "cta": "الذهاب إلى لوحة التحكم"
+    },
+    "back": "رجوع"
+  },
+  "Nav": {
+    "overview": "نظرة عامة",
+    "orders": "الطلبات",
+    "stores": "المتاجر",
+    "confirmation": "التأكيد",
+    "activity": "النشاط",
+    "settings": "الإعدادات",
+    "logout": "تسجيل الخروج"
+  },
+  "Overview": {
+    "title": "نظرة عامة",
+    "ordersToday": "طلبات اليوم",
+    "pending": "بانتظار التأكيد",
+    "confirmed": "مؤكدة",
+    "cancelled": "ملغاة",
+    "confirmationRate": "نسبة التأكيد",
+    "recentOrders": "أحدث الطلبات",
+    "viewAll": "عرض الكل",
+    "empty": "لا توجد طلبات بعد. بمجرد وصول أول طلب من متجرك، هيظهر هنا."
+  },
+  "Orders": {
+    "title": "الطلبات",
+    "searchPlaceholder": "ابحث برقم الطلب أو اسم العميل أو رقم الهاتف",
+    "filters": { "all": "الكل", "pending": "بانتظار التأكيد", "confirmed": "مؤكدة", "cancelled": "ملغاة" },
+    "table": {
+      "order": "الطلب",
+      "customer": "العميل",
+      "store": "المتجر",
+      "total": "الإجمالي",
+      "status": "الحالة",
+      "channel": "القناة",
+      "time": "الوقت"
+    },
+    "empty": "لا توجد طلبات تطابق هذا الفلتر.",
+    "detail": {
+      "back": "الرجوع للطلبات",
+      "customer": "العميل",
+      "items": "المنتجات",
+      "total": "الإجمالي",
+      "confirmation": "التأكيد",
+      "channel": "القناة",
+      "store": "المتجر",
+      "timeline": "سجل التواصل",
+      "resend": "إعادة إرسال التأكيد",
+      "markConfirmed": "وضع علامة كمؤكد",
+      "markCancelled": "وضع علامة كملغى",
+      "noChannel": "لم يُرسل بعد"
+    },
+    "status": { "pending": "بانتظار التأكيد", "confirmed": "مؤكد", "cancelled": "ملغى", "expired": "منتهي" },
+    "events": {
+      "order_received": "تم استلام الطلب",
+      "confirmation_sent": "تم إرسال التأكيد",
+      "confirmation_response_confirmed": "العميل أكّد الطلب",
+      "confirmation_response_cancelled": "العميل ألغى الطلب",
+      "confirmation_response_invalid": "تم تجاهل الرد (الطلب مغلق بالفعل)",
+      "confirmation_failed": "فشل إرسال رسالة التأكيد",
+      "order_expired": "انتهت صلاحية الطلب",
+      "store_synced": "تم تحديث المتجر",
+      "store_sync_failed": "فشل تحديث المتجر"
+    }
+  },
+  "Stores": {
+    "title": "المتاجر",
+    "connectShopify": "ربط Shopify",
+    "connectWooCommerce": "ربط WooCommerce",
+    "configure": "إعداد",
+    "testConnection": "اختبار الاتصال",
+    "disconnect": "فصل الاتصال",
+    "status": { "connected": "متصل", "disconnected": "غير متصل", "error": "خطأ في الاتصال" },
+    "empty": "لا توجد متاجر مربوطة بعد.",
+    "disconnectConfirmTitle": "فصل هذا المتجر؟",
+    "disconnectConfirmBody": "أكدلي هيوقف إرسال التأكيدات للطلبات الجديدة من هذا المتجر.",
+    "cancel": "إلغاء",
+    "confirmDisconnect": "فصل المتجر"
+  },
+  "Settings": {
+    "title": "إعدادات التأكيد",
+    "subtitle": "اختر كيف يؤكد أكدلي الطلبات الجديدة لكل متجر.",
+    "autoConfirm": "إرسال التأكيدات تلقائياً",
+    "autoConfirmHint": "عند الإيقاف، تبقى الطلبات بانتظار التأكيد حتى ترسله يدوياً.",
+    "channel": "قناة التأكيد",
+    "channelWhatsapp": "واتساب",
+    "channelPhoneSoon": "مكالمة هاتفية (قريباً)",
+    "channelBothSoon": "واتساب ← مكالمة هاتفية (قريباً)",
+    "language": "لغة الرسالة",
+    "arabic": "العربية",
+    "english": "الإنجليزية",
+    "save": "حفظ التغييرات",
+    "saved": "تم حفظ الإعدادات."
+  },
+  "Account": {
+    "title": "الحساب",
+    "name": "الاسم",
+    "email": "البريد الإلكتروني",
+    "plan": "الباقة"
+  },
+  "Activity": {
+    "title": "النشاط",
+    "subtitle": "كل رسالة اتبعتت وكل رد وصل، من كل متاجرك.",
+    "empty": "لا يوجد نشاط بعد."
+  },
+  "Common": {
+    "loading": "جارٍ التحميل…",
+    "error": "حدث خطأ ما.",
+    "retry": "حاول مرة أخرى",
+    "language": "اللغة"
+  }
+}
