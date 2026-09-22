@@ -167,6 +167,18 @@ export async function testStoreConnection(merchantId: string, storeId: string): 
     store.status = result.ok ? "connected" : "error";
     store.lastConnectionError = result.ok ? undefined : result.error;
     await store.save();
+
+    // A successful credential test doesn't guarantee the webhook subscription
+    // itself is still correct (e.g. it may have been registered against a
+    // callback URL that's since changed) — re-verify/repair it on every test
+    // so merchants have a way to fix a stale registration without a full
+    // OAuth reconnect.
+    if (result.ok) {
+      await registerStoreWebhooks(store.id);
+      const refreshed = await StoreModel.findById(storeId);
+      return refreshed ?? store;
+    }
+
     return store;
   } catch (err) {
     if (err instanceof ShopifyReauthorizationRequiredError) {

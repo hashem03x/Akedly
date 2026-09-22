@@ -212,23 +212,70 @@ export class ShopifyProvider implements StoreProvider {
 
     const address = `${callbackBaseUrl}/api/v1/webhooks/shopify`;
 
-    // Idempotency: skip creating a new subscription if one already points at this
-    // exact address/topic (e.g. the merchant disconnects and reconnects the store).
+    // List ALL existing ORDERS_CREATE subscriptions for this shop — not filtered by
+    // callbackUrl. A subscription created against a previously-wrong callback base
+    // (e.g. before a deployment/env-var fix, or a custom-domain migration) would be
+    // invisible to an address-filtered lookup and left stale forever: Shopify keeps
+    // delivering to a URL Akedly no longer serves, while this code thinks nothing is
+    // registered yet and reports the connection as healthy anyway.
     const existing = await shopifyGraphQL<{
-      webhookSubscriptions: { edges: { node: { id: string } }[] };
+      webhookSubscriptions: { edges: { node: { id: string; callbackUrl: string } }[] };
     }>(
       input.domain,
       input.accessToken,
       "listWebhookSubscriptions",
-      `query ListWebhooks($callbackUrl: URL!) {
-        webhookSubscriptions(first: 1, topics: [ORDERS_CREATE], callbackUrl: $callbackUrl) {
-          edges { node { id } }
+      `query ListWebhooks {
+        webhookSubscriptions(first: 10, topics: [ORDERS_CREATE]) {
+          edges { node { id callbackUrl } }
         }
-      }`,
-      { callbackUrl: address }
+      }`
     );
 
-    if (existing.ok && existing.data.webhookSubscriptions.edges.length > 0) {
+    if (!existing.ok) {
+      throw new Error(`Failed to list Shopify webhook subscriptions: ${existing.error}`);
+    }
+
+    const subscriptions = existing.data.webhookSubscriptions.edges.map((edge) => edge.node);
+    const alreadyCorrect = subscriptions.find((s) => s.callbackUrl === address);
+
+    if (alreadyCorrect) {
+      logger.info("shopify_webhook_registration_ok", { shop: input.domain, action: "none" });
+      return;
+    }
+
+    const stale = subscriptions[0];
+
+    if (stale) {
+      const updated = await shopifyGraphQL<{
+        webhookSubscriptionUpdate: {
+          webhookSubscription: { id: string } | null;
+          userErrors: UserError[];
+        };
+      }>(
+        input.domain,
+        input.accessToken,
+        "webhookSubscriptionUpdate",
+        `mutation UpdateWebhook($id: ID!, $webhookSubscription: WebhookSubscriptionInput!) {
+          webhookSubscriptionUpdate(id: $id, webhookSubscription: $webhookSubscription) {
+            webhookSubscription { id }
+            userErrors { field message }
+          }
+        }`,
+        { id: stale.id, webhookSubscription: { callbackUrl: address, format: "JSON" } }
+      );
+
+      if (!updated.ok) {
+        throw new Error(`Failed to update Shopify webhook: ${updated.error}`);
+      }
+      const updateError = firstUserError(updated.data.webhookSubscriptionUpdate.userErrors);
+      if (updateError) {
+        throw new Error(`Failed to update Shopify webhook: ${updateError}`);
+      }
+
+      logger.warn("shopify_webhook_registration_ok", {
+        shop: input.domain,
+        action: "corrected_stale_callback",
+      });
       return;
     }
 
@@ -257,6 +304,8 @@ export class ShopifyProvider implements StoreProvider {
     if (userError) {
       throw new Error(`Failed to register Shopify webhook: ${userError}`);
     }
+
+    logger.info("shopify_webhook_registration_ok", { shop: input.domain, action: "created" });
   }
 
   /**

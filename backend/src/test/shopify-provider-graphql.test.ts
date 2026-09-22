@@ -98,9 +98,22 @@ describe("ShopifyProvider (GraphQL Admin API)", () => {
   });
 
   describe("registerWebhooks", () => {
-    it("skips creating a subscription when one already exists for this address/topic", async () => {
+    it("skips writing anything when a subscription already points at the current address", async () => {
       global.fetch = jest.fn(async () =>
-        jsonResponse(200, { data: { webhookSubscriptions: { edges: [{ node: { id: "gid://shopify/WebhookSubscription/1" } }] } } })
+        jsonResponse(200, {
+          data: {
+            webhookSubscriptions: {
+              edges: [
+                {
+                  node: {
+                    id: "gid://shopify/WebhookSubscription/1",
+                    callbackUrl: "https://akedly-backend.vercel.app/api/v1/webhooks/shopify",
+                  },
+                },
+              ],
+            },
+          },
+        })
       ) as unknown as typeof fetch;
 
       const provider = new ShopifyProvider();
@@ -109,7 +122,7 @@ describe("ShopifyProvider (GraphQL Admin API)", () => {
         "https://akedly-backend.vercel.app"
       );
 
-      expect(global.fetch).toHaveBeenCalledTimes(1); // list only, no create mutation
+      expect(global.fetch).toHaveBeenCalledTimes(1); // list only, no create/update mutation
     });
 
     it("creates a subscription via GraphQL when none exists", async () => {
@@ -140,6 +153,56 @@ describe("ShopifyProvider (GraphQL Admin API)", () => {
       expect(calls[1]).toContain("webhookSubscriptionCreate");
     });
 
+    it("updates a subscription pointing at a stale callback address instead of leaving it or creating a duplicate", async () => {
+      const calls: { query: string; variables: unknown }[] = [];
+      global.fetch = jest.fn(async (_url: string, init: RequestInit) => {
+        const body = JSON.parse(init.body as string);
+        calls.push({ query: body.query, variables: body.variables });
+        if (calls.length === 1) {
+          return jsonResponse(200, {
+            data: {
+              webhookSubscriptions: {
+                edges: [
+                  {
+                    node: {
+                      id: "gid://shopify/WebhookSubscription/1",
+                      // Points at an old/wrong deployment — e.g. the frontend URL
+                      // from before the callback-base-URL bug was fixed.
+                      callbackUrl: "https://frontend-sooty-zeta-59.vercel.app/api/v1/webhooks/shopify",
+                    },
+                  },
+                ],
+              },
+            },
+          });
+        }
+        return jsonResponse(200, {
+          data: {
+            webhookSubscriptionUpdate: {
+              webhookSubscription: { id: "gid://shopify/WebhookSubscription/1" },
+              userErrors: [],
+            },
+          },
+        });
+      }) as unknown as typeof fetch;
+
+      const provider = new ShopifyProvider();
+      await provider.registerWebhooks(
+        { domain: "dev-akedly.myshopify.com", accessToken: "shpat_test" },
+        "https://akedly-backend.vercel.app"
+      );
+
+      expect(calls).toHaveLength(2);
+      expect(calls[1].query).toContain("webhookSubscriptionUpdate");
+      expect(calls[1].variables).toEqual({
+        id: "gid://shopify/WebhookSubscription/1",
+        webhookSubscription: {
+          callbackUrl: "https://akedly-backend.vercel.app/api/v1/webhooks/shopify",
+          format: "JSON",
+        },
+      });
+    });
+
     it("throws when Shopify reports userErrors on the create mutation", async () => {
       let callCount = 0;
       global.fetch = jest.fn(async () => {
@@ -162,6 +225,52 @@ describe("ShopifyProvider (GraphQL Admin API)", () => {
           "https://akedly-backend.vercel.app"
         )
       ).rejects.toThrow(/is invalid/);
+    });
+
+    it("throws when Shopify reports userErrors on the update mutation", async () => {
+      let callCount = 0;
+      global.fetch = jest.fn(async () => {
+        callCount += 1;
+        if (callCount === 1) {
+          return jsonResponse(200, {
+            data: {
+              webhookSubscriptions: {
+                edges: [{ node: { id: "gid://shopify/WebhookSubscription/1", callbackUrl: "https://old.example.com/hook" } }],
+              },
+            },
+          });
+        }
+        return jsonResponse(200, {
+          data: {
+            webhookSubscriptionUpdate: {
+              webhookSubscription: null,
+              userErrors: [{ field: ["callbackUrl"], message: "is invalid" }],
+            },
+          },
+        });
+      }) as unknown as typeof fetch;
+
+      const provider = new ShopifyProvider();
+      await expect(
+        provider.registerWebhooks(
+          { domain: "dev-akedly.myshopify.com", accessToken: "shpat_test" },
+          "https://akedly-backend.vercel.app"
+        )
+      ).rejects.toThrow(/is invalid/);
+    });
+
+    it("throws when listing existing subscriptions fails", async () => {
+      global.fetch = jest.fn(async () =>
+        jsonResponse(200, { errors: [{ message: "Access denied for webhookSubscriptions" }] })
+      ) as unknown as typeof fetch;
+
+      const provider = new ShopifyProvider();
+      await expect(
+        provider.registerWebhooks(
+          { domain: "dev-akedly.myshopify.com", accessToken: "shpat_test" },
+          "https://akedly-backend.vercel.app"
+        )
+      ).rejects.toThrow(/Access denied/);
     });
   });
 
