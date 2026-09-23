@@ -11,7 +11,8 @@
     "start": "node dist/src/server.js",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src --ext .ts",
-    "test": "jest --runInBand"
+    "test": "jest --runInBand",
+    "migrate:drop-orphaned-order-index": "tsx scripts/drop-orphaned-order-index.ts"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

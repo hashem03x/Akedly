@@ -101,6 +101,41 @@ describe("Shopify orders/create webhook — end-to-end", () => {
     expect(sent.status).toBe("sent");
   });
 
+  it("persists the real Shopify order id end-to-end for a second order on the same merchant (2026-09-23 production incident regression)", async () => {
+    // Reproduces the exact production scenario: a merchant's SECOND order ever
+    // (first order id 111111, second order id 7613447438529, the real id from
+    // the incident report) must both succeed with their real externalOrderId —
+    // this is only exercisable once the orphaned merchantId_1_shopifyOrderId_1
+    // index is dropped in the target database; against this schema alone it
+    // already passes, proving the application layer was never the problem.
+    const store = await createStore();
+
+    const firstRes = await postWebhook(app, orderPayload(111111), {
+      domain: store.domain,
+      topic: "orders/create",
+      webhookId: "wh-incident-1",
+    });
+    expect(firstRes.status).toBe(200);
+
+    const secondRes = await postWebhook(app, orderPayload("7613447438529"), {
+      domain: store.domain,
+      topic: "orders/create",
+      webhookId: "wh-incident-2",
+    });
+    expect(secondRes.status).toBe(200);
+    expect(secondRes.body.data.created).toBe(true);
+
+    const order = await OrderModel.findOne({
+      storeId: store._id,
+      externalOrderId: "7613447438529",
+    });
+    expect(order).not.toBeNull();
+    expect(order.externalOrderId).toBe("7613447438529");
+
+    const orderCountForMerchant = await OrderModel.countDocuments({ merchantId: store.merchantId });
+    expect(orderCountForMerchant).toBe(2);
+  });
+
   it("does not send a WhatsApp confirmation when the store has auto-confirmation disabled", async () => {
     const store = await createStore({ settings: { autoConfirmationEnabled: false } });
 

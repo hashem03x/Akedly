@@ -44,7 +44,7 @@ export const env = {
     clientId: process.env.SHOPIFY_CLIENT_ID ?? "",
     clientSecret: process.env.SHOPIFY_CLIENT_SECRET ?? "",
     scopes: process.env.SHOPIFY_SCOPES ?? "read_orders,write_orders",
-    apiVersion: process.env.SHOPIFY_API_VERSION ?? "2024-07",
+    apiVersion: process.env.SHOPIFY_API_VERSION ?? "2026-07",
   },
 
   woocommerce: {
