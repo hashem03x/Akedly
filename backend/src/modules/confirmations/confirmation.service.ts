@@ -48,12 +48,16 @@ export async function sendConfirmationForOrder(
     currency: order.currency,
   });
 
+  // type distinguishes success/failure (not just `status`) because the dashboard
+  // timeline (frontend/src/components/orders/Timeline.tsx) keys its label off
+  // `type` alone for this event — recording every attempt as "confirmation_sent"
+  // regardless of outcome silently told merchants a failed send had succeeded.
   await recordCommunication({
     merchantId: String(order.merchantId),
     orderId: order.id,
     channel: "whatsapp",
     direction: "outbound",
-    type: "confirmation_sent",
+    type: result.success ? "confirmation_sent" : "confirmation_failed",
     status: result.success ? "sent" : "failed",
     providerMessageId: result.providerMessageId,
     metadata: result.success ? undefined : { error: result.error },
@@ -62,8 +66,9 @@ export async function sendConfirmationForOrder(
   if (result.success) {
     order.confirmationChannel = "whatsapp";
     await order.save();
+    logger.info("communication_created", { orderId: order.id, type: "confirmation_sent" });
   } else {
-    logger.warn("WhatsApp confirmation send failed", { orderId: order.id, error: result.error });
+    logger.warn("whatsapp_confirmation_send_failed", { orderId: order.id, error: result.error });
   }
 
   return order;

@@ -35,10 +35,6 @@ export function createApp(): Express {
   app.use(cookieParser());
   app.use("/api/v1", apiRateLimiter, apiRoutes);
 
-  app.get("/api/v1/health", (_req, res) => {
-    res.json({ success: true, data: { status: "ok" } });
-  });
-
   app.use(notFoundHandler);
   app.use(errorHandler);
 

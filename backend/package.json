@@ -12,7 +12,8 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint src --ext .ts",
     "test": "jest --runInBand",
-    "migrate:drop-orphaned-order-index": "tsx scripts/drop-orphaned-order-index.ts"
+    "migrate:drop-orphaned-order-index": "tsx scripts/drop-orphaned-order-index.ts",
+    "migrate:drop-orphaned-webhookevent-index": "tsx scripts/drop-orphaned-webhookevent-index.ts"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

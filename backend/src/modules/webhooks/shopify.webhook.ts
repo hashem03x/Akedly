@@ -4,6 +4,7 @@ import { env } from "../../config/env";
 import { asyncHandler } from "../../middleware/error.middleware";
 import { sendError, sendSuccess } from "../../utils/api-response";
 import { logger } from "../../utils/logger";
+import { generateRequestId, runWithRequestId } from "../../utils/request-context";
 import { getStoreProvider } from "../../integrations/store-providers";
 import { StoreModel } from "../stores/store.model";
 import { ingestOrder } from "../orders/order.service";
@@ -12,7 +13,11 @@ import { claimWebhookEvent, completeWebhookEvent, failWebhookEvent } from "./web
 
 const ORDERS_CREATE_TOPIC = "orders/create";
 
-export const handleShopifyWebhook = asyncHandler(async (req: Request, res: Response) => {
+export const handleShopifyWebhook = asyncHandler(async (req: Request, res: Response) =>
+  runWithRequestId(generateRequestId(), () => handleShopifyWebhookInner(req, res))
+);
+
+async function handleShopifyWebhookInner(req: Request, res: Response) {
   const rawBody = req.body as Buffer;
   const domain = req.header("x-shopify-shop-domain");
   const webhookId = req.header("x-shopify-webhook-id");
@@ -59,11 +64,29 @@ export const handleShopifyWebhook = asyncHandler(async (req: Request, res: Respo
   }
   logger.info("shopify_webhook_verified", { shop: domain, webhookId: webhookId ?? null });
 
-  const store = await StoreModel.findOne({ platform: "shopify", domain: domain.toLowerCase() });
+  // Sorted newest-first as a defensive measure: a shop domain must map to exactly
+  // one store, but merchant deletion/reconnection can leave an orphaned Store
+  // record behind for the same domain under a stale merchantId (see
+  // store.service.ts's upsertShopifyStoreFromOAuth, which is the real fix —
+  // this is a safety net so a future data-hygiene slip degrades to "picks the
+  // most recently connected store" instead of "picks whichever one Mongo felt
+  // like returning").
+  const matchingStores = await StoreModel.find({ platform: "shopify", domain: domain.toLowerCase() }).sort({
+    createdAt: -1,
+  });
+  const store = matchingStores.find((s) => s.status === "connected") ?? matchingStores[0];
   if (!store) {
     return sendError(res, 404, "STORE_NOT_FOUND", "No store is registered for this shop domain.");
   }
-  logger.info("store_resolved", { shop: domain, storeId: store.id });
+  if (matchingStores.length > 1) {
+    logger.error("shopify_webhook_multiple_stores_for_domain", {
+      shop: domain,
+      matchedStoreIds: matchingStores.map((s) => s.id),
+      selectedStoreId: store.id,
+      selectedMerchantId: String(store.merchantId),
+    });
+  }
+  logger.info("store_resolved", { shop: domain, storeId: store.id, merchantId: String(store.merchantId) });
 
   const idempotencyKey = webhookId ?? crypto.createHash("sha256").update(rawBody).digest("hex");
   const isNewDelivery = await claimWebhookEvent("shopify", idempotencyKey);
@@ -115,19 +138,27 @@ export const handleShopifyWebhook = asyncHandler(async (req: Request, res: Respo
   }
 
   await completeWebhookEvent("shopify", idempotencyKey);
-  logger.info("akedly_order_created", { shop: domain, storeId: store.id, orderId: order.id, created });
+  logger.info("shopify_order_created", { shop: domain, storeId: store.id, orderId: order.id, created });
 
-  sendSuccess(res, { orderId: order.id, created });
-
+  // Sending the WhatsApp confirmation is awaited BEFORE responding to Shopify,
+  // not fired-and-forgotten after sendSuccess. This is a serverless deployment
+  // (Vercel, see backend/api/index.ts) — a Node process is not guaranteed to
+  // keep running background work once its HTTP response has been sent, so any
+  // code placed after the response here would race the platform freezing/
+  // tearing down the function and silently never complete. A single WhatsApp
+  // API call comfortably fits inside Shopify's 5s webhook timeout budget; if
+  // that stops being true (e.g. a slower provider), move this to a real queue
+  // rather than reintroducing the post-response race.
   if (created && store.settings?.autoConfirmationEnabled) {
     logger.info("confirmation_requested", { shop: domain, storeId: store.id, orderId: order.id });
     try {
       await sendConfirmationForOrder(order, store);
     } catch (err) {
-      logger.error("Failed to send confirmation after Shopify order ingest", {
+      logger.error("shopify_order_processing_failed", {
         shop: domain,
         storeId: store.id,
         orderId: order.id,
+        stage: "whatsapp_send",
         errorName: err instanceof Error ? err.name : "UnknownError",
         errorMessage: err instanceof Error ? err.message : String(err),
       });
@@ -135,4 +166,7 @@ export const handleShopifyWebhook = asyncHandler(async (req: Request, res: Respo
   } else if (created) {
     logger.info("confirmation_skipped_auto_confirm_disabled", { shop: domain, storeId: store.id, orderId: order.id });
   }
-});
+
+  sendSuccess(res, { orderId: order.id, created });
+  return;
+}

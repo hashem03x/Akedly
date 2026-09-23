@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import { env } from "../../config/env";
 import { ApiError } from "../../utils/api-error";
+import { logger } from "../../utils/logger";
 import { decryptSecret, encryptSecret } from "../../utils/crypto";
 import { getStoreProvider } from "../../integrations/store-providers";
 import type { StoreConnectionInput } from "../../integrations/store-providers/store-provider.interface";
@@ -92,8 +93,57 @@ export async function upsertShopifyStoreFromOAuth(
   store.lastConnectionError = undefined;
   await store.save();
 
+  await reassignOtherStoresForDomain("shopify", shop, merchantId, store.id);
   await registerStoreWebhooks(store.id);
   return store;
+}
+
+/**
+ * A given (platform, domain) must belong to exactly one merchant at a time —
+ * every webhook lookup (shopify.webhook.ts, woocommerce.webhook.ts) resolves a
+ * store by domain alone, with no merchant context to disambiguate. The unique
+ * index on {merchantId, platform, domain} only prevents ONE merchant from
+ * creating a duplicate; it does nothing when a shop moves to a different
+ * merchant account (re-authorized under a new signup, or the previous
+ * merchant's account was deleted without cascading its stores). Left behind,
+ * that old Store row is a silent trap: new webhooks can resolve to it instead
+ * of the live connection, attributing real orders (and their WhatsApp
+ * confirmations) to a merchant who can no longer see them on any dashboard.
+ * This is not hypothetical — it's the exact shape of a 2026-09-23 production
+ * incident where orders were being processed and confirmed, but invisible to
+ * the logged-in merchant, because they were silently attributed to a deleted
+ * account. Disconnecting (not deleting) the stale record preserves its order
+ * history for audit/support purposes while guaranteeing every future webhook
+ * for this domain resolves to the merchant who just proved ownership via OAuth.
+ */
+async function reassignOtherStoresForDomain(
+  platform: "shopify",
+  domain: string,
+  keepMerchantId: string,
+  keepStoreId: string
+): Promise<void> {
+  const stale = await StoreModel.find({
+    platform,
+    domain,
+    _id: { $ne: keepStoreId },
+    merchantId: { $ne: keepMerchantId },
+  });
+
+  if (stale.length === 0) return;
+
+  for (const staleStore of stale) {
+    staleStore.status = "disconnected";
+    staleStore.lastConnectionError = `Superseded: this domain was reconnected under a different Akedly account on ${new Date().toISOString()}.`;
+    await staleStore.save();
+  }
+
+  logger.warn("shopify_store_domain_reassigned", {
+    shop: domain,
+    newStoreId: keepStoreId,
+    newMerchantId: keepMerchantId,
+    disconnectedStoreIds: stale.map((s) => s.id),
+    disconnectedMerchantIds: stale.map((s) => String(s.merchantId)),
+  });
 }
 
 export async function connectWooCommerceStore(

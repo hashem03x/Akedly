@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import { env } from "../../config/env";
 import { logger } from "../../utils/logger";
+import { fetchWithTimeout, FetchTimeoutError } from "../../utils/http";
 import type { NormalizedOrderInput } from "../../modules/orders/order.types";
 import type {
   ConnectionTestResult,
@@ -80,16 +81,21 @@ async function shopifyGraphQL<T>(
 
   let res: Response;
   try {
-    res = await fetch(graphqlUrl(domain), {
-      method: "POST",
-      headers: {
-        "X-Shopify-Access-Token": accessToken,
-        "Content-Type": "application/json",
+    res = await fetchWithTimeout(
+      graphqlUrl(domain),
+      {
+        method: "POST",
+        headers: {
+          "X-Shopify-Access-Token": accessToken,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ query, variables }),
       },
-      body: JSON.stringify({ query, variables }),
-    });
+      15_000
+    );
   } catch (err) {
-    logger.error("Shopify Admin API request threw", {
+    const isTimeout = err instanceof FetchTimeoutError;
+    logger.error(isTimeout ? "shopify_api_timeout" : "Shopify Admin API request threw", {
       shop: domain,
       method: "POST",
       urlPath,

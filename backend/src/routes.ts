@@ -6,6 +6,8 @@ import orderRoutes from "./modules/orders/order.routes";
 import confirmationRoutes from "./modules/confirmations/confirmation.routes";
 import communicationRoutes from "./modules/communications/communication.routes";
 import shopifyOAuthRoutes from "./modules/stores/shopify-oauth.routes";
+import healthRoutes from "./modules/health/health.routes";
+import diagnosticsRoutes from "./modules/diagnostics/diagnostics.routes";
 
 const router = Router();
 
@@ -16,5 +18,7 @@ router.use("/orders", orderRoutes);
 router.use("/confirmations", confirmationRoutes);
 router.use("/communications", communicationRoutes);
 router.use("/integrations/shopify/oauth", shopifyOAuthRoutes);
+router.use("/health", healthRoutes);
+router.use("/diagnostics", diagnosticsRoutes);
 
 export default router;

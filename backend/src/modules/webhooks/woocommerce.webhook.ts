@@ -3,6 +3,7 @@ import crypto from "crypto";
 import { asyncHandler } from "../../middleware/error.middleware";
 import { sendError, sendSuccess } from "../../utils/api-response";
 import { logger } from "../../utils/logger";
+import { generateRequestId, runWithRequestId } from "../../utils/request-context";
 import { decryptSecret } from "../../utils/crypto";
 import { getStoreProvider } from "../../integrations/store-providers";
 import { StoreModel } from "../stores/store.model";
@@ -10,7 +11,11 @@ import { ingestOrder } from "../orders/order.service";
 import { sendConfirmationForOrder } from "../confirmations/confirmation.service";
 import { claimWebhookEvent, completeWebhookEvent, failWebhookEvent } from "./webhook-event.model";
 
-export const handleWooCommerceWebhook = asyncHandler(async (req: Request, res: Response) => {
+export const handleWooCommerceWebhook = asyncHandler(async (req: Request, res: Response) =>
+  runWithRequestId(generateRequestId(), () => handleWooCommerceWebhookInner(req, res))
+);
+
+async function handleWooCommerceWebhookInner(req: Request, res: Response) {
   const rawBody = req.body as Buffer;
   const sourceUrl = req.header("x-wc-webhook-source");
 
@@ -62,16 +67,27 @@ export const handleWooCommerceWebhook = asyncHandler(async (req: Request, res: R
   }
 
   await completeWebhookEvent("woocommerce", idempotencyKey);
-  sendSuccess(res, { orderId: order.id, created });
+  logger.info("woocommerce_order_created", { storeId: store.id, orderId: order.id, created });
 
+  // See shopify.webhook.ts for why this is awaited before responding rather
+  // than fired-and-forgotten after sendSuccess: this runs on Vercel serverless
+  // (backend/api/index.ts), which does not guarantee code keeps running after
+  // the HTTP response is sent.
   if (created && store.settings?.autoConfirmationEnabled) {
+    logger.info("confirmation_requested", { storeId: store.id, orderId: order.id });
     try {
       await sendConfirmationForOrder(order, store);
     } catch (err) {
-      logger.error("Failed to send confirmation after WooCommerce order ingest", {
+      logger.error("woocommerce_order_processing_failed", {
+        storeId: store.id,
         orderId: order.id,
-        message: (err as Error).message,
+        stage: "whatsapp_send",
+        errorName: err instanceof Error ? err.name : "UnknownError",
+        errorMessage: err instanceof Error ? err.message : String(err),
       });
     }
   }
-});
+
+  sendSuccess(res, { orderId: order.id, created });
+  return;
+}

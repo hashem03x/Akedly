@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { fetchWithTimeout } from "../../utils/http";
 import type { NormalizedOrderInput } from "../../modules/orders/order.types";
 import type {
   ConnectionTestResult,
@@ -46,7 +47,7 @@ export class WooCommerceProvider implements StoreProvider {
       return { ok: false, error: "Missing WooCommerce API credentials." };
     }
     try {
-      const res = await fetch(`${baseUrl(input.domain)}/wp-json/wc/v3/`, {
+      const res = await fetchWithTimeout(`${baseUrl(input.domain)}/wp-json/wc/v3/`, {
         headers: { Authorization: authHeader(input.consumerKey, input.consumerSecret) },
       });
       if (!res.ok) {
@@ -63,7 +64,7 @@ export class WooCommerceProvider implements StoreProvider {
       throw new Error("Missing WooCommerce API credentials.");
     }
     const delivery_url = `${callbackBaseUrl}/api/v1/webhooks/woocommerce`;
-    const res = await fetch(`${baseUrl(input.domain)}/wp-json/wc/v3/webhooks`, {
+    const res = await fetchWithTimeout(`${baseUrl(input.domain)}/wp-json/wc/v3/webhooks`, {
       method: "POST",
       headers: {
         Authorization: authHeader(input.consumerKey, input.consumerSecret),
@@ -140,7 +141,7 @@ export class WooCommerceProvider implements StoreProvider {
       throw new Error("Missing WooCommerce API credentials.");
     }
     const status = order.status === "confirmed" ? "processing" : "cancelled";
-    const res = await fetch(`${baseUrl(input.domain)}/wp-json/wc/v3/orders/${order.externalOrderId}`, {
+    const res = await fetchWithTimeout(`${baseUrl(input.domain)}/wp-json/wc/v3/orders/${order.externalOrderId}`, {
       method: "PUT",
       headers: {
         Authorization: authHeader(input.consumerKey, input.consumerSecret),
