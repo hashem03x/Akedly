@@ -52,13 +52,20 @@ export async function sendConfirmationForOrder(
   // timeline (frontend/src/components/orders/Timeline.tsx) keys its label off
   // `type` alone for this event — recording every attempt as "confirmation_sent"
   // regardless of outcome silently told merchants a failed send had succeeded.
+  //
+  // status is "accepted", not "sent", on success: an HTTP 200 from Meta's Graph
+  // API only means the request was accepted for processing, not that WhatsApp
+  // actually delivered (or even sent) it — see communication.model.ts. This
+  // record is upgraded to "sent"/"delivered"/"read"/"failed" later by
+  // updateCommunicationStatusByProviderMessageId when (if) Meta's own status
+  // webhook arrives — see webhooks/whatsapp.webhook.ts's processStatusUpdate.
   await recordCommunication({
     merchantId: String(order.merchantId),
     orderId: order.id,
     channel: "whatsapp",
     direction: "outbound",
     type: result.success ? "confirmation_sent" : "confirmation_failed",
-    status: result.success ? "sent" : "failed",
+    status: result.success ? "accepted" : "failed",
     providerMessageId: result.providerMessageId,
     metadata: result.success ? undefined : { error: result.error },
   });

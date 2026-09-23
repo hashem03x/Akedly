@@ -188,6 +188,9 @@
     "events": {
       "order_received": "Order received",
       "confirmation_sent": "Confirmation sent",
+      "confirmation_sent_accepted": "Confirmation accepted by WhatsApp (not yet confirmed delivered)",
+      "confirmation_sent_delivered": "Confirmation delivered",
+      "confirmation_sent_read": "Confirmation read",
       "confirmation_response_confirmed": "Customer confirmed",
       "confirmation_response_cancelled": "Customer cancelled",
       "confirmation_response_invalid": "Reply ignored (order already closed)",

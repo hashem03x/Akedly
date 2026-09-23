@@ -188,6 +188,9 @@
     "events": {
       "order_received": "تم استلام الطلب",
       "confirmation_sent": "تم إرسال التأكيد",
+      "confirmation_sent_accepted": "تم قبول الرسالة من واتساب (لم يتأكد التسليم بعد)",
+      "confirmation_sent_delivered": "تم تسليم رسالة التأكيد",
+      "confirmation_sent_read": "تمت قراءة رسالة التأكيد",
       "confirmation_response_confirmed": "العميل أكّد الطلب",
       "confirmation_response_cancelled": "العميل ألغى الطلب",
       "confirmation_response_invalid": "تم تجاهل الرد (الطلب مغلق بالفعل)",

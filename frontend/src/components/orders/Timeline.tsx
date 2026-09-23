@@ -4,6 +4,14 @@ import type { CommunicationEvent } from "@/lib/api-types";
 function eventKey(event: CommunicationEvent): string {
   if (event.type === "confirmation_response") return `confirmation_response_${event.status}`;
   if (event.type === "store_synced" && event.status === "failed") return "store_sync_failed";
+  // HTTP 200 from Meta's send API ("accepted") is not delivery confirmation —
+  // status is later upgraded to sent/delivered/read/failed by a real Meta
+  // status webhook (backend/src/modules/webhooks/whatsapp.webhook.ts). Falls
+  // back to the bare "confirmation_sent" label for older records that predate
+  // this distinction (status "sent" from before "accepted" existed).
+  if (event.type === "confirmation_sent") {
+    return event.status === "sent" ? "confirmation_sent" : `confirmation_sent_${event.status}`;
+  }
   return event.type;
 }
 

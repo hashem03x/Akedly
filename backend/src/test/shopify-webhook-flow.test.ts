@@ -98,7 +98,11 @@ describe("Shopify orders/create webhook — end-to-end", () => {
       type: "confirmation_sent",
     });
     expect(sent).not.toBeNull();
-    expect(sent.status).toBe("sent");
+    // "accepted", not "sent": an HTTP 200 from the (mock) provider only means the
+    // send request was accepted — see communication.model.ts and
+    // confirmation.service.ts. It's upgraded to "sent"/"delivered"/"read" only by
+    // a real Meta status webhook, which this test never simulates.
+    expect(sent.status).toBe("accepted");
   });
 
   it("persists the real Shopify order id end-to-end for a second order on the same merchant (2026-09-23 production incident regression)", async () => {

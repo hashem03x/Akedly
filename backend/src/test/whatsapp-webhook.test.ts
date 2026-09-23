@@ -196,6 +196,36 @@ describe("POST /api/v1/webhooks/whatsapp event handling", () => {
     expect(comm.status).toBe("delivered");
   });
 
+  it("upgrades a freshly-accepted send (HTTP 200 from Meta, not yet delivered) through a real status webhook — 2026-09-23/24 production report regression", async () => {
+    // Reproduces the reported scenario exactly: confirmation.service.ts records
+    // "accepted" immediately after Meta's Graph API returns 200 (not "sent" —
+    // that's not delivery confirmation). Only a genuine Meta status webhook
+    // should ever move it further, and this proves the matching/update logic
+    // does that correctly for the accepted -> sent -> delivered path.
+    const { merchant, order } = await createOrderFixture();
+    await CommunicationModel.create({
+      merchantId: merchant._id,
+      orderId: order._id,
+      channel: "whatsapp",
+      direction: "outbound",
+      type: "confirmation_sent",
+      status: "accepted",
+      providerMessageId: "wamid.ACCEPTED1",
+    });
+
+    const sentBody = JSON.stringify(
+      metaEnvelope({ statuses: [{ id: "wamid.ACCEPTED1", status: "sent", recipient_id: "201001234567" }] })
+    );
+    expect((await postWebhook(app, sentBody, sign(sentBody))).status).toBe(200);
+    expect((await CommunicationModel.findOne({ providerMessageId: "wamid.ACCEPTED1" })).status).toBe("sent");
+
+    const deliveredBody = JSON.stringify(
+      metaEnvelope({ statuses: [{ id: "wamid.ACCEPTED1", status: "delivered", recipient_id: "201001234567" }] })
+    );
+    expect((await postWebhook(app, deliveredBody, sign(deliveredBody))).status).toBe(200);
+    expect((await CommunicationModel.findOne({ providerMessageId: "wamid.ACCEPTED1" })).status).toBe("delivered");
+  });
+
   it("records a failed status with safe error metadata (no secrets)", async () => {
     const { merchant, order } = await createOrderFixture();
     await CommunicationModel.create({

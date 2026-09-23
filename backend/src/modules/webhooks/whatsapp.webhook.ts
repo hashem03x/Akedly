@@ -5,6 +5,7 @@ import { env } from "../../config/env";
 import { asyncHandler } from "../../middleware/error.middleware";
 import { sendError, sendSuccess } from "../../utils/api-response";
 import { logger } from "../../utils/logger";
+import { generateRequestId, runWithRequestId } from "../../utils/request-context";
 import { maskPhone } from "../../utils/mask";
 import { ApiError } from "../../utils/api-error";
 import { OrderModel } from "../orders/order.model";
@@ -23,13 +24,14 @@ export const verifyWhatsAppWebhook = (req: Request, res: Response) => {
   const exactMatch = typeof token === "string" && token === configuredToken;
 
   if (mode === "subscribe" && configuredToken.length > 0 && exactMatch) {
+    logger.info("whatsapp_webhook_verification_succeeded", { hubMode: mode });
     res.status(200).send(challenge);
     return;
   }
 
   // Booleans/lengths only — never the token values — so a future misconfiguration
   // (blank var, stale deploy, whitespace) is diagnosable from logs alone.
-  logger.warn("WhatsApp webhook GET verification failed", {
+  logger.warn("whatsapp_webhook_verification_failed", {
     hubModeIsSubscribe: mode === "subscribe",
     verifyTokenConfigured: configuredToken.length > 0,
     tokenReceived: typeof token === "string",
@@ -114,20 +116,37 @@ function safeEqual(a: string, b: string): boolean {
   return crypto.timingSafeEqual(bufA, bufB);
 }
 
-export const handleWhatsAppWebhook = asyncHandler(async (req: Request, res: Response) => {
+export const handleWhatsAppWebhook = asyncHandler(async (req: Request, res: Response) =>
+  runWithRequestId(generateRequestId(), () => handleWhatsAppWebhookInner(req, res))
+);
+
+async function handleWhatsAppWebhookInner(req: Request, res: Response) {
   const rawBody = req.body as Buffer;
+  const signature = req.header("x-hub-signature-256");
+
+  // Logged unconditionally, before signature verification — otherwise a request
+  // that gets rejected below (bad/missing secret, bad signature) leaves zero
+  // trace, and "Meta never sent this webhook" becomes indistinguishable from
+  // "Meta sent it but Akedly rejected it". Never logs the signature value itself.
+  logger.info("whatsapp_status_webhook_received", {
+    method: req.method,
+    path: req.path,
+    hasSignature: Boolean(signature),
+    contentType: req.header("content-type") ?? null,
+    bodyLength: Buffer.isBuffer(rawBody) ? rawBody.length : 0,
+  });
 
   // Signature verification is mandatory, not best-effort: a missing app secret
   // is a deployment misconfiguration, not an excuse to accept unverified requests.
   if (!env.whatsapp.metaAppSecret) {
-    logger.error("WHATSAPP_META_APP_SECRET is not configured; rejecting webhook.");
+    logger.error("whatsapp_webhook_not_configured", { missing: "WHATSAPP_META_APP_SECRET" });
     return sendError(res, 500, "WEBHOOK_NOT_CONFIGURED", "WhatsApp webhook verification is not configured.");
   }
 
-  const signature = req.header("x-hub-signature-256");
   const computed =
     "sha256=" + crypto.createHmac("sha256", env.whatsapp.metaAppSecret).update(rawBody).digest("hex");
   if (!signature || !safeEqual(signature, computed)) {
+    logger.error("whatsapp_webhook_invalid_signature", { hasSignature: Boolean(signature) });
     return sendError(res, 401, "INVALID_SIGNATURE", "Webhook signature verification failed.");
   }
 
@@ -135,10 +154,12 @@ export const handleWhatsAppWebhook = asyncHandler(async (req: Request, res: Resp
   try {
     payload = JSON.parse(rawBody.toString("utf8"));
   } catch {
+    logger.error("whatsapp_webhook_malformed_payload", {});
     return sendError(res, 400, "MALFORMED_PAYLOAD", "Webhook payload was not valid JSON.");
   }
 
   const { messages, statuses } = parseWhatsAppWebhookPayload(payload);
+  logger.info("whatsapp_webhook_verified", { messageCount: messages.length, statusCount: statuses.length });
 
   // Vercel serverless functions can stop executing shortly after the response
   // is sent — there's no background worker here to finish the job — so
@@ -168,7 +189,8 @@ export const handleWhatsAppWebhook = asyncHandler(async (req: Request, res: Resp
   }
 
   sendSuccess(res, { messages: messages.length, statuses: statuses.length });
-});
+  return;
+}
 
 async function processInboundMessage(message: MetaMessage): Promise<void> {
   if (!message.id) return;
@@ -251,8 +273,15 @@ async function processButtonReply(buttonReply: MetaButtonReply, providerMessageI
 async function processStatusUpdate(status: MetaStatus): Promise<void> {
   if (!status.id || !status.status) return;
 
+  logger.info("whatsapp_message_status_received", {
+    providerMessageId: status.id,
+    status: status.status,
+    recipientMasked: status.recipient_id ? maskPhone(status.recipient_id) : undefined,
+    timestamp: status.timestamp,
+  });
+
   if (!VALID_STATUS_VALUES.has(status.status)) {
-    logger.info("WhatsApp webhook: unhandled status value", { status: status.status, messageId: status.id });
+    logger.info("whatsapp_message_status_ignored", { providerMessageId: status.id, status: status.status });
     return;
   }
 
@@ -261,8 +290,8 @@ async function processStatusUpdate(status: MetaStatus): Promise<void> {
   if (!isNewDelivery) return;
 
   try {
-    const metadata =
-      status.status === "failed" && status.errors?.length ? { errors: status.errors } : undefined;
+    const firstError = status.status === "failed" ? status.errors?.[0] : undefined;
+    const metadata = status.errors?.length ? { errors: status.errors } : undefined;
 
     const updated = await updateCommunicationStatusByProviderMessageId(
       status.id,
@@ -274,7 +303,22 @@ async function processStatusUpdate(status: MetaStatus): Promise<void> {
       // Not an error — this instance may not have the outbound record (e.g. sent
       // via a different Akedly deployment/account), or it's for a message we
       // sent outside the confirmation flow.
-      logger.info("WhatsApp webhook: status update for unknown message id", { messageId: status.id });
+      logger.info("whatsapp_message_status_unmatched", { providerMessageId: status.id, status: status.status });
+    } else if (status.status === "failed") {
+      logger.error("whatsapp_message_status_failed", {
+        providerMessageId: status.id,
+        orderId: String(updated.orderId),
+        merchantId: String(updated.merchantId),
+        errorCode: firstError?.code,
+        errorMessage: firstError?.title,
+      });
+    } else {
+      logger.info("whatsapp_message_status_updated", {
+        providerMessageId: status.id,
+        orderId: String(updated.orderId),
+        merchantId: String(updated.merchantId),
+        status: status.status,
+      });
     }
     await completeWebhookEvent("whatsapp", idempotencyKey);
   } catch (err) {

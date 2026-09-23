@@ -17,6 +17,12 @@ export const COMMUNICATION_TYPES = [
 export type CommunicationType = (typeof COMMUNICATION_TYPES)[number];
 
 export const COMMUNICATION_STATUSES = [
+  // "accepted" = Meta's Graph API returned 200 for our send request — distinct
+  // from "sent", which (for outbound whatsapp communications) means Meta's own
+  // status webhook reported the message as actually sent to the WhatsApp
+  // network. An HTTP 200 from the send call is not delivery confirmation; see
+  // confirmation.service.ts and webhooks/whatsapp.webhook.ts's processStatusUpdate.
+  "accepted",
   "sent",
   "delivered",
   "read",
