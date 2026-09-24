@@ -146,20 +146,44 @@ describe("POST /api/v1/webhooks/whatsapp event handling", () => {
     expect(res.body.data.statuses).toBe(0);
   });
 
-  it("confirms an order on a confirm button reply and records the inbound event", async () => {
-    const { order } = await createOrderFixture();
-    const body = JSON.stringify(
+  async function seedOutboundConfirmation(order: any, providerMessageId: string) {
+    await CommunicationModel.create({
+      merchantId: order.merchantId,
+      orderId: order._id,
+      channel: "whatsapp",
+      direction: "outbound",
+      type: "confirmation_sent",
+      status: "accepted",
+      providerMessageId,
+    });
+  }
+
+  function buttonReplyBody(opts: { messageId: string; buttonId: string; title: string; contextId: string; from?: string }) {
+    return JSON.stringify(
       metaEnvelope({
         messages: [
           {
-            id: "wamid.BTN1",
-            from: "201001234567",
+            id: opts.messageId,
+            from: opts.from ?? "201001234567",
             type: "interactive",
-            interactive: { button_reply: { id: `confirm:${order.id}`, title: "Confirm Order" } },
+            interactive: { button_reply: { id: opts.buttonId, title: opts.title } },
+            context: { id: opts.contextId },
           },
         ],
       })
     );
+  }
+
+  it("confirms an order on a confirm_order button reply, correlated via context.id (the replied-to template's wamid), and records the inbound event", async () => {
+    const { order } = await createOrderFixture();
+    await seedOutboundConfirmation(order, "wamid.TEMPLATE1");
+
+    const body = buttonReplyBody({
+      messageId: "wamid.BTN1",
+      buttonId: "confirm_order",
+      title: "تأكيد الطلب",
+      contextId: "wamid.TEMPLATE1",
+    });
 
     const res = await postWebhook(app, body, sign(body));
     expect(res.status).toBe(200);
@@ -170,6 +194,125 @@ describe("POST /api/v1/webhooks/whatsapp event handling", () => {
     const events = await CommunicationModel.find({ orderId: order.id, direction: "inbound" });
     expect(events).toHaveLength(1);
     expect(events[0].status).toBe("confirmed");
+  });
+
+  it("does not confirm/cancel anything when the button reply's context.id doesn't match any known outbound message", async () => {
+    const { order } = await createOrderFixture();
+    const body = buttonReplyBody({
+      messageId: "wamid.BTN_ORPHAN",
+      buttonId: "confirm_order",
+      title: "تأكيد الطلب",
+      contextId: "wamid.NEVER_SENT",
+    });
+
+    const res = await postWebhook(app, body, sign(body));
+    expect(res.status).toBe(200);
+
+    const updated = await OrderModel.findById(order.id);
+    expect(updated.confirmationStatus).toBe("pending");
+    expect(await CommunicationModel.countDocuments({ orderId: order.id, direction: "inbound" })).toBe(0);
+  });
+
+  it("cannot act on another merchant's order — context.id only ever resolves to the order it was actually sent for", async () => {
+    const { order: orderA } = await createOrderFixture();
+    const { order: orderB } = await createOrderFixture();
+    await seedOutboundConfirmation(orderA, "wamid.TEMPLATE_A");
+    await seedOutboundConfirmation(orderB, "wamid.TEMPLATE_B");
+
+    const body = buttonReplyBody({
+      messageId: "wamid.BTN_A",
+      buttonId: "confirm_order",
+      title: "تأكيد الطلب",
+      contextId: "wamid.TEMPLATE_A",
+    });
+    await postWebhook(app, body, sign(body));
+
+    expect((await OrderModel.findById(orderA.id)).confirmationStatus).toBe("confirmed");
+    expect((await OrderModel.findById(orderB.id)).confirmationStatus).toBe("pending");
+  });
+
+  it("safely ignores an unknown button id instead of crashing", async () => {
+    const { order } = await createOrderFixture();
+    await seedOutboundConfirmation(order, "wamid.TEMPLATE_UNKNOWN");
+
+    const body = buttonReplyBody({
+      messageId: "wamid.BTN_UNKNOWN",
+      buttonId: "some_other_button",
+      title: "???",
+      contextId: "wamid.TEMPLATE_UNKNOWN",
+    });
+
+    const res = await postWebhook(app, body, sign(body));
+    expect(res.status).toBe(200);
+    expect((await OrderModel.findById(order.id)).confirmationStatus).toBe("pending");
+  });
+
+  it("processes a duplicate button-tap webhook delivery idempotently (no double confirmation)", async () => {
+    const { order } = await createOrderFixture();
+    await seedOutboundConfirmation(order, "wamid.TEMPLATE_DUP");
+
+    const body = buttonReplyBody({
+      messageId: "wamid.BTN_DUP",
+      buttonId: "confirm_order",
+      title: "تأكيد الطلب",
+      contextId: "wamid.TEMPLATE_DUP",
+    });
+
+    await postWebhook(app, body, sign(body));
+    await postWebhook(app, body, sign(body));
+
+    expect((await OrderModel.findById(order.id)).confirmationStatus).toBe("confirmed");
+    expect(await CommunicationModel.countDocuments({ orderId: order.id, direction: "inbound" })).toBe(1);
+  });
+
+  it("cancel_order does not cancel immediately — it asks for a reason, then cancels once the reason arrives, and never sends the prompt twice", async () => {
+    const { order } = await createOrderFixture();
+    await seedOutboundConfirmation(order, "wamid.TEMPLATE_CANCEL");
+
+    const cancelBody = buttonReplyBody({
+      messageId: "wamid.BTN_CANCEL",
+      buttonId: "cancel_order",
+      title: "إلغاء الطلب",
+      contextId: "wamid.TEMPLATE_CANCEL",
+    });
+    const res1 = await postWebhook(app, cancelBody, sign(cancelBody));
+    expect(res1.status).toBe(200);
+
+    let updated = await OrderModel.findById(order.id);
+    expect(updated.confirmationStatus).toBe("awaiting_cancellation_reason");
+    const promptEvents = await CommunicationModel.find({ orderId: order.id, type: "cancellation_reason_requested" });
+    expect(promptEvents).toHaveLength(1);
+
+    // A second, genuinely different cancel-button webhook delivery for the
+    // same order (e.g. an impatient double-tap) must not send the prompt again.
+    const secondCancelBody = buttonReplyBody({
+      messageId: "wamid.BTN_CANCEL_2",
+      buttonId: "cancel_order",
+      title: "إلغاء الطلب",
+      contextId: "wamid.TEMPLATE_CANCEL",
+    });
+    await postWebhook(app, secondCancelBody, sign(secondCancelBody));
+    expect(await CommunicationModel.countDocuments({ orderId: order.id, type: "cancellation_reason_requested" })).toBe(1);
+
+    const reasonBody = JSON.stringify(
+      metaEnvelope({
+        messages: [{ id: "wamid.REASON1", from: "201001234567", type: "text", text: { body: "Changed my mind" } }],
+      })
+    );
+    const res2 = await postWebhook(app, reasonBody, sign(reasonBody));
+    expect(res2.status).toBe(200);
+
+    updated = await OrderModel.findById(order.id);
+    expect(updated.confirmationStatus).toBe("cancelled");
+    expect(updated.cancellationReason).toBe("Changed my mind");
+
+    const finalCancelEvent = await CommunicationModel.findOne({
+      orderId: order.id,
+      direction: "inbound",
+      status: "cancelled",
+    });
+    expect(finalCancelEvent).not.toBeNull();
+    expect(finalCancelEvent.metadata.reason).toBe("Changed my mind");
   });
 
   it("updates the matching outbound communication's status from a status webhook", async () => {
@@ -343,7 +486,7 @@ describe("WhatsAppMetaProvider", () => {
     global.fetch = originalFetch;
   });
 
-  it("sends an order confirmation via the Graph API messages endpoint", async () => {
+  it("sends the approved akedly_order_confirmation template (not a freeform/interactive message) via the Graph API messages endpoint", async () => {
     const calls: { url: string; init: RequestInit }[] = [];
     global.fetch = jest.fn(async (url: string, init: RequestInit) => {
       calls.push({ url, init });
@@ -358,12 +501,12 @@ describe("WhatsAppMetaProvider", () => {
     const result = await provider.sendOrderConfirmation({
       orderId: "order1",
       toPhone: "+201001234567",
-      language: "en",
+      language: "ar",
       customerName: "Ahmed",
       storeName: "Leopard",
       orderNumber: "1042",
       items: [{ name: "Shirt", quantity: 1 }],
-      total: 100,
+      total: 500,
       currency: "EGP",
     });
 
@@ -372,9 +515,26 @@ describe("WhatsAppMetaProvider", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0].url).toBe("https://graph.facebook.com/v20.0/1234567890/messages");
     expect((calls[0].init.headers as Record<string, string>).Authorization).toBe("Bearer test-access-token");
+
     const bodySent = JSON.parse(calls[0].init.body as string);
     expect(bodySent.to).toBe("+201001234567");
-    expect(bodySent.type).toBe("interactive");
+    // Not "interactive" — a freeform/interactive message here would return
+    // HTTP 200 with a wamid and then fail asynchronously outside an open 24h
+    // session (see whatsapp-meta.provider.ts's sendOrderConfirmation doc).
+    expect(bodySent.type).toBe("template");
+    expect(bodySent.template.name).toBe("akedly_order_confirmation");
+    expect(bodySent.template.language.code).toBe("en");
+
+    const params = bodySent.template.components[0].parameters;
+    expect(params).toEqual([
+      { type: "text", parameter_name: "customer_name", text: "Ahmed" },
+      { type: "text", parameter_name: "order_id", text: "#1042" },
+      { type: "text", parameter_name: "store_name", text: "Leopard" },
+      // Formatted in the template's fixed "en" language regardless of the
+      // store's own messageLanguage ("ar" was passed above) — see the
+      // provider's doc comment.
+      { type: "text", parameter_name: "order_total", text: "500 EGP" },
+    ]);
   });
 
   it("sends a template message (e.g. hello_world) via the same endpoint", async () => {

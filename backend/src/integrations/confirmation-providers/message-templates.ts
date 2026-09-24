@@ -14,7 +14,7 @@ const CURRENCY_LABEL: Record<string, { ar: string; en: string }> = {
   EGP: { ar: "جنيه", en: "EGP" },
 };
 
-function formatCurrency(amount: number, currency: string, language: MessageLanguage): string {
+export function formatCurrency(amount: number, currency: string, language: MessageLanguage): string {
   const label = CURRENCY_LABEL[currency]?.[language] ?? currency;
   const value = amount.toLocaleString(language === "ar" ? "ar-EG" : "en-US");
   return language === "ar" ? `${value} ${label}` : `${value} ${label}`;

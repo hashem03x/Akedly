@@ -184,7 +184,13 @@
       "markCancelled": "Mark as cancelled",
       "noChannel": "Not sent yet"
     },
-    "status": { "pending": "Pending", "confirmed": "Confirmed", "cancelled": "Cancelled", "expired": "Expired" },
+    "status": {
+      "pending": "Pending",
+      "awaiting_cancellation_reason": "Awaiting cancellation reason",
+      "confirmed": "Confirmed",
+      "cancelled": "Cancelled",
+      "expired": "Expired"
+    },
     "events": {
       "order_received": "Order received",
       "confirmation_sent": "Confirmation sent",
@@ -192,9 +198,11 @@
       "confirmation_sent_delivered": "Confirmation delivered",
       "confirmation_sent_read": "Confirmation read",
       "confirmation_response_confirmed": "Customer confirmed",
+      "confirmation_response_cancellation_requested": "Customer requested cancellation",
       "confirmation_response_cancelled": "Customer cancelled",
       "confirmation_response_invalid": "Reply ignored (order already closed)",
       "confirmation_failed": "Confirmation message failed to send",
+      "cancellation_reason_requested": "Asked customer for cancellation reason",
       "order_expired": "Order expired",
       "store_synced": "Store updated",
       "store_sync_failed": "Store update failed"

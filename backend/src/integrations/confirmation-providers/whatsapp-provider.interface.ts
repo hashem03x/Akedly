@@ -56,4 +56,12 @@ export interface WhatsAppProvider {
   /** Generic template send — used for Meta's `hello_world` connectivity test today,
    *  and reusable for future Akedly-approved templates without a new provider method. */
   sendTemplateMessage(input: SendTemplateMessageInput): Promise<SendMessageResult>;
+  /**
+   * Plain freeform text — only valid within an open 24h WhatsApp customer
+   * service window (e.g. immediately after the customer taps a button on a
+   * template message, as with the cancellation-reason prompt in
+   * confirmation.service.ts). Never used for the first, business-initiated
+   * contact — that must go through sendOrderConfirmation's template.
+   */
+  sendTextMessage(toPhone: string, body: string): Promise<SendMessageResult>;
 }

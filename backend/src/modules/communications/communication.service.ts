@@ -39,3 +39,20 @@ export async function updateCommunicationStatusByProviderMessageId(
     { new: true }
   );
 }
+
+/**
+ * Resolves the order a Quick Reply button belongs to. The approved
+ * `akedly_order_confirmation` template's buttons carry a fixed payload
+ * ("confirm_order"/"cancel_order" — set once in Meta Business Manager at
+ * template-approval time, not per-send), so the order can no longer be read
+ * out of the button id itself. Instead, WhatsApp's inbound button-reply
+ * payload includes `context.id`: the wamid of the template message the
+ * customer replied to — exactly the id already stored as this outbound
+ * communication's providerMessageId. See webhooks/whatsapp.webhook.ts's
+ * resolveOrderIdFromContext.
+ */
+export async function findOutboundCommunicationByProviderMessageId(
+  providerMessageId: string
+): Promise<CommunicationDocument | null> {
+  return CommunicationModel.findOne({ providerMessageId, direction: "outbound" }).sort({ createdAt: -1 });
+}

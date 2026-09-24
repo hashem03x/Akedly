@@ -4,6 +4,7 @@ import type { ConfirmationStatus } from "@/lib/api-types";
 
 const TONE: Record<ConfirmationStatus, "neutral" | "success" | "danger" | "warning"> = {
   pending: "warning",
+  awaiting_cancellation_reason: "warning",
   confirmed: "success",
   cancelled: "danger",
   expired: "neutral",

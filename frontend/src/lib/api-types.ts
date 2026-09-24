@@ -53,7 +53,7 @@ export interface Store {
   createdAt: string;
 }
 
-export type ConfirmationStatus = "pending" | "confirmed" | "cancelled" | "expired";
+export type ConfirmationStatus = "pending" | "awaiting_cancellation_reason" | "confirmed" | "cancelled" | "expired";
 
 export interface OrderItem {
   name: string;

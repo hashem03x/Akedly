@@ -1,7 +1,8 @@
 import crypto from "crypto";
+import { env } from "../../config/env";
 import { logger } from "../../utils/logger";
 import { maskPhone } from "../../utils/mask";
-import { buildOrderConfirmationMessage } from "./message-templates";
+import { formatCurrency } from "./message-templates";
 import type {
   OrderConfirmationMessageInput,
   SendMessageResult,
@@ -13,20 +14,26 @@ import type {
  * Development-only provider. Never enabled in production (see config/env.ts).
  * Logs the message instead of calling a real WhatsApp API, so the full
  * order -> confirmation -> response loop can be exercised locally via the
- * dev "simulate reply" webhook endpoint.
+ * dev "simulate reply" webhook endpoint. Mirrors the real Meta provider's
+ * template-based send (see whatsapp-meta.provider.ts) so local testing
+ * exercises the same shape production actually sends.
  */
 export class WhatsAppMockProvider implements WhatsAppProvider {
   readonly name = "mock";
 
   async sendOrderConfirmation(input: OrderConfirmationMessageInput): Promise<SendMessageResult> {
-    const message = buildOrderConfirmationMessage(input);
     const providerMessageId = `mock_${crypto.randomUUID()}`;
 
-    logger.info(`[MOCK WHATSAPP] Confirmation sent to ${maskPhone(input.toPhone)}`, {
+    logger.info(`[MOCK WHATSAPP] Template "${env.whatsapp.confirmationTemplateName}" sent to ${maskPhone(input.toPhone)}`, {
       orderId: input.orderId,
-      orderNumber: input.orderNumber,
-      body: message.body,
-      buttons: message.buttons.map((b) => b.title),
+      template: env.whatsapp.confirmationTemplateName,
+      language: env.whatsapp.confirmationTemplateLanguage,
+      parameters: {
+        customer_name: input.customerName,
+        order_id: `#${input.orderNumber}`,
+        store_name: input.storeName,
+        order_total: formatCurrency(input.total, input.currency, "en"),
+      },
       providerMessageId,
     });
 
@@ -41,6 +48,14 @@ export class WhatsAppMockProvider implements WhatsAppProvider {
       languageCode: input.languageCode,
       providerMessageId,
     });
+
+    return { success: true, providerMessageId };
+  }
+
+  async sendTextMessage(toPhone: string, body: string): Promise<SendMessageResult> {
+    const providerMessageId = `mock_${crypto.randomUUID()}`;
+
+    logger.info(`[MOCK WHATSAPP] Text sent to ${maskPhone(toPhone)}`, { body, providerMessageId });
 
     return { success: true, providerMessageId };
   }

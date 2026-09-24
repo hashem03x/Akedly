@@ -8,7 +8,10 @@ import { buildStoreConnectionInput } from "../stores/store.service";
 import { OrderModel, type OrderDocument, type ConfirmationStatus } from "../orders/order.model";
 
 const ALLOWED_TRANSITIONS: Record<ConfirmationStatus, ConfirmationStatus[]> = {
-  pending: ["confirmed", "cancelled", "expired"],
+  pending: ["confirmed", "cancelled", "expired", "awaiting_cancellation_reason"],
+  // Customer tapped cancel and is being asked why; still reversible (they can
+  // tap confirm instead) or can time out like any other pending order.
+  awaiting_cancellation_reason: ["cancelled", "confirmed", "expired"],
   confirmed: [],
   cancelled: [],
   expired: [],
@@ -154,10 +157,116 @@ export async function confirmOrder(orderId: string, ctx: TransitionContext): Pro
   return transitionOrder(orderId, "confirmed", ctx);
 }
 
+/**
+ * Immediate cancellation — no reason prompt. Used by the merchant's own
+ * dashboard "cancel order" action (confirmation.controller.ts), which is a
+ * merchant decision, not a customer reply, so it must not be routed through
+ * the WhatsApp reason-collection flow below.
+ */
 export async function cancelOrder(orderId: string, ctx: TransitionContext): Promise<OrderDocument> {
   return transitionOrder(orderId, "cancelled", ctx);
 }
 
 export async function expireOrder(orderId: string): Promise<OrderDocument> {
   return transitionOrder(orderId, "expired", { channel: "system" });
+}
+
+/**
+ * Customer tapped "إلغاء الطلب" (cancel_order). Doesn't cancel the order yet —
+ * moves it to awaiting_cancellation_reason and asks the customer why, via a
+ * plain text message. That's a freeform (non-template) send, which is only
+ * allowed within an open 24h session — valid here because the customer just
+ * messaged us (tapping the button opens the window).
+ *
+ * Idempotent by design, not just by accident: if the order is already
+ * awaiting_cancellation_reason (double-tap, retried webhook that got past
+ * dedup some other way), this returns early WITHOUT re-sending the prompt —
+ * required by the "must not send duplicate cancellation prompts" invariant.
+ */
+export async function startCancellationReasonCollection(
+  orderId: string,
+  ctx: TransitionContext
+): Promise<OrderDocument> {
+  const order = await OrderModel.findById(orderId);
+  if (!order) {
+    throw ApiError.notFound("Order not found.", "ORDER_NOT_FOUND");
+  }
+
+  if (order.confirmationStatus === "awaiting_cancellation_reason" || order.confirmationStatus === "cancelled") {
+    return order;
+  }
+
+  assertValidTransition(order.confirmationStatus as ConfirmationStatus, "awaiting_cancellation_reason");
+  order.confirmationStatus = "awaiting_cancellation_reason";
+  await order.save();
+
+  const store = await StoreModel.findById(order.storeId);
+  const language = store?.settings?.messageLanguage ?? "ar";
+  const promptText =
+    language === "ar"
+      ? "تمام، ممكن تقولنا سبب إلغاء الطلب؟"
+      : "Okay — could you tell us the reason for cancelling this order?";
+
+  const provider = getWhatsAppProvider();
+  const result = await provider.sendTextMessage(order.customer.phone, promptText);
+
+  await recordCommunication({
+    merchantId: String(order.merchantId),
+    orderId: order.id,
+    channel: "whatsapp",
+    direction: "outbound",
+    type: "cancellation_reason_requested",
+    status: result.success ? "accepted" : "failed",
+    providerMessageId: result.providerMessageId,
+    metadata: result.success ? undefined : { error: result.error },
+  });
+
+  if (!result.success) {
+    logger.warn("whatsapp_cancellation_reason_prompt_failed", { orderId: order.id, error: result.error });
+  }
+
+  return order;
+}
+
+/**
+ * Customer's free-text reply while an order is awaiting_cancellation_reason.
+ * Records the reason on the order, actually cancels it (reusing the same
+ * transition/store-sync path as any other cancellation), and sends a short
+ * closing acknowledgement — best-effort; the cancellation itself must not
+ * fail just because the courtesy text couldn't be sent.
+ */
+export async function completeCancellationWithReason(
+  orderId: string,
+  reason: string,
+  ctx: TransitionContext
+): Promise<OrderDocument> {
+  const order = await OrderModel.findById(orderId);
+  if (!order) {
+    throw ApiError.notFound("Order not found.", "ORDER_NOT_FOUND");
+  }
+
+  if (order.confirmationStatus === "cancelled") {
+    return order;
+  }
+
+  assertValidTransition(order.confirmationStatus as ConfirmationStatus, "cancelled");
+  order.cancellationReason = reason;
+  order.confirmationStatus = "cancelled";
+  order.cancelledAt = new Date();
+  await order.save();
+
+  await syncOrderToStore(order, "cancelled");
+
+  const store = await StoreModel.findById(order.storeId);
+  const language = store?.settings?.messageLanguage ?? "ar";
+  const ackText =
+    language === "ar" ? "تم إلغاء طلبك. شكراً لإخبارنا." : "Your order has been cancelled. Thank you for letting us know.";
+
+  try {
+    await getWhatsAppProvider().sendTextMessage(order.customer.phone, ackText);
+  } catch (err) {
+    logger.warn("whatsapp_cancellation_ack_failed", { orderId: order.id, message: (err as Error).message });
+  }
+
+  return order;
 }

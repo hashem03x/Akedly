@@ -11,6 +11,7 @@ export const COMMUNICATION_TYPES = [
   "confirmation_sent",
   "confirmation_response",
   "confirmation_failed",
+  "cancellation_reason_requested",
   "order_expired",
   "store_synced",
 ] as const;
@@ -28,6 +29,10 @@ export const COMMUNICATION_STATUSES = [
   "read",
   "failed",
   "confirmed",
+  // Customer tapped the cancel button — order isn't cancelled yet, Akedly is
+  // waiting for their reason. Final cancellation is a separate later event
+  // (status "cancelled", same as before) once the reason arrives.
+  "cancellation_requested",
   "cancelled",
   "invalid",
 ] as const;

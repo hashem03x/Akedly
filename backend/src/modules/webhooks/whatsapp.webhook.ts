@@ -10,8 +10,17 @@ import { maskPhone } from "../../utils/mask";
 import { ApiError } from "../../utils/api-error";
 import { OrderModel } from "../orders/order.model";
 import type { CommunicationDocument } from "../communications/communication.model";
-import { recordCommunication, updateCommunicationStatusByProviderMessageId } from "../communications/communication.service";
-import { confirmOrder, cancelOrder } from "../confirmations/confirmation.service";
+import {
+  recordCommunication,
+  updateCommunicationStatusByProviderMessageId,
+  findOutboundCommunicationByProviderMessageId,
+  listCommunicationsForOrder,
+} from "../communications/communication.service";
+import {
+  confirmOrder,
+  startCancellationReasonCollection,
+  completeCancellationWithReason,
+} from "../confirmations/confirmation.service";
 import { claimWebhookEvent, completeWebhookEvent, failWebhookEvent } from "./webhook-event.model";
 
 /** Meta requires GET verification of the callback URL when it's first configured. */
@@ -50,6 +59,10 @@ interface MetaMessage {
   type?: string;
   text?: { body?: string };
   interactive?: { button_reply?: MetaButtonReply };
+  /** wamid of the message this is a reply to — how a button tap is
+   *  correlated back to an order now that the template's button payloads are
+   *  fixed strings rather than embedding an order id. See resolveOrderIdFromContext. */
+  context?: { id?: string };
 }
 
 interface MetaStatusError {
@@ -103,10 +116,93 @@ export function parseWhatsAppWebhookPayload(payload: MetaWebhookPayload): {
   };
 }
 
-function parseButtonId(buttonId: string): { action: "confirm" | "cancel" | null; orderId: string | null } {
-  const [action, orderId] = buttonId.split(":");
-  if (action !== "confirm" && action !== "cancel") return { action: null, orderId: null };
-  return { action, orderId: orderId ?? null };
+// Fixed Quick Reply payloads configured on the approved akedly_order_confirmation
+// template in Meta Business Manager — stable identifiers, not the (localized,
+// changeable) button titles "تأكيد الطلب"/"إلغاء الطلب".
+const BUTTON_ACTIONS: Record<string, "confirm" | "cancel"> = {
+  confirm_order: "confirm",
+  cancel_order: "cancel",
+};
+
+function resolveButtonAction(buttonId: string): "confirm" | "cancel" | null {
+  return BUTTON_ACTIONS[buttonId] ?? null;
+}
+
+/** Loose phone match (suffix comparison on digits only) tolerant of the
+ *  +/country-code/leading-zero formatting differences between how Shopify
+ *  supplies a customer's phone and how Meta reports the sender's `from`. */
+function phoneDigitsMatch(a: string, b: string): boolean {
+  const da = a.replace(/\D/g, "");
+  const db = b.replace(/\D/g, "");
+  if (da.length < 7 || db.length < 7) return false;
+  const [shorter, longer] = da.length <= db.length ? [da, db] : [db, da];
+  return longer.endsWith(shorter);
+}
+
+/**
+ * Resolves the order a button reply belongs to via the wamid of the message
+ * being replied to (Meta's `context.id`) — see
+ * communication.service.ts's findOutboundCommunicationByProviderMessageId.
+ */
+async function resolveOrderIdFromContext(contextMessageId: string | undefined): Promise<string | null> {
+  if (!contextMessageId) return null;
+  const comm = await findOutboundCommunicationByProviderMessageId(contextMessageId);
+  return comm ? String(comm.orderId) : null;
+}
+
+/**
+ * Free-text replies aren't tied to a specific message via `context` the way
+ * button replies are, so an order "awaiting_cancellation_reason" is matched
+ * by the sender's phone number instead. The candidate set is expected to be
+ * tiny (orders actively mid-cancellation, across the whole app, at this
+ * instant) so filtering in application code is simpler and more robust than
+ * a fragile phone-format-sensitive Mongo query.
+ */
+async function findOrderAwaitingCancellationReason(fromPhone: string) {
+  const candidates = await OrderModel.find({ confirmationStatus: "awaiting_cancellation_reason" }).sort({
+    updatedAt: -1,
+  });
+  const matches = candidates.filter((o) => phoneDigitsMatch(o.customer.phone, fromPhone));
+  if (matches.length > 1) {
+    logger.warn("whatsapp_cancellation_reason_ambiguous_match", {
+      fromMasked: maskPhone(fromPhone),
+      candidateCount: matches.length,
+    });
+  }
+  return matches[0] ?? null;
+}
+
+/** Returns true if this text message was consumed as a cancellation reason. */
+async function tryHandleAsCancellationReason(message: MetaMessage): Promise<boolean> {
+  const body = message.text?.body?.trim();
+  if (!message.from || !body) return false;
+
+  const order = await findOrderAwaitingCancellationReason(message.from);
+  if (!order) return false;
+
+  logger.info("whatsapp_cancellation_reason_received", {
+    orderId: order.id,
+    merchantId: String(order.merchantId),
+    providerMessageId: message.id,
+  });
+
+  const updated = await completeCancellationWithReason(order.id, body, {
+    channel: "whatsapp",
+    providerMessageId: message.id,
+  });
+
+  await recordCommunication({
+    merchantId: String(updated.merchantId),
+    orderId: updated.id,
+    channel: "whatsapp",
+    direction: "inbound",
+    type: "confirmation_response",
+    status: "cancelled",
+    providerMessageId: message.id,
+    metadata: { reason: body },
+  });
+
+  return true;
 }
 
 function safeEqual(a: string, b: string): boolean {
@@ -201,14 +297,17 @@ async function processInboundMessage(message: MetaMessage): Promise<void> {
   try {
     const buttonReply = message.interactive?.button_reply;
     if (buttonReply) {
-      await processButtonReply(buttonReply, message.id);
+      await processButtonReply(buttonReply, message);
     } else if (message.type === "text") {
-      // V1 is a button-only confirmation flow — free-text replies aren't tied to
-      // an order, so they're just logged for visibility, not acted on.
-      logger.info("WhatsApp webhook: received text message", {
-        from: message.from ? maskPhone(message.from) : undefined,
-        messageId: message.id,
-      });
+      const handledAsReason = await tryHandleAsCancellationReason(message);
+      if (!handledAsReason) {
+        // Free text unrelated to a pending cancellation-reason request isn't
+        // tied to any order — just logged for visibility, not acted on.
+        logger.info("WhatsApp webhook: received text message", {
+          from: message.from ? maskPhone(message.from) : undefined,
+          messageId: message.id,
+        });
+      }
     } else {
       logger.info("WhatsApp webhook: received unhandled message type", {
         type: message.type ?? "unknown",
@@ -224,34 +323,78 @@ async function processInboundMessage(message: MetaMessage): Promise<void> {
   }
 }
 
-async function processButtonReply(buttonReply: MetaButtonReply, providerMessageId: string): Promise<void> {
-  const { action, orderId } = parseButtonId(buttonReply.id);
-  if (!action || !orderId) {
-    logger.warn("WhatsApp webhook: unrecognized button payload", { buttonId: buttonReply.id });
+async function processButtonReply(buttonReply: MetaButtonReply, message: MetaMessage): Promise<void> {
+  const providerMessageId = message.id;
+  const action = resolveButtonAction(buttonReply.id);
+
+  logger.info("whatsapp_button_reply_received", {
+    buttonId: buttonReply.id,
+    providerMessageId,
+    from: message.from ? maskPhone(message.from) : undefined,
+  });
+
+  if (!action) {
+    logger.warn("whatsapp_button_reply_unknown", { buttonId: buttonReply.id, providerMessageId });
+    return;
+  }
+
+  const orderId = await resolveOrderIdFromContext(message.context?.id);
+  if (!orderId) {
+    logger.warn("whatsapp_button_reply_order_resolved", {
+      providerMessageId,
+      resolved: false,
+      contextId: message.context?.id ?? null,
+    });
     return;
   }
 
   const order = await OrderModel.findById(orderId);
   if (!order) {
-    logger.warn("WhatsApp webhook: order not found for button reply", { orderId });
+    logger.warn("whatsapp_button_reply_order_resolved", {
+      providerMessageId,
+      orderId,
+      resolved: false,
+      reason: "order_not_found",
+    });
     return;
   }
 
-  try {
-    const updated =
-      action === "confirm"
-        ? await confirmOrder(order.id, { channel: "whatsapp", providerMessageId })
-        : await cancelOrder(order.id, { channel: "whatsapp", providerMessageId });
+  logger.info("whatsapp_button_reply_order_resolved", {
+    providerMessageId,
+    orderId,
+    merchantId: String(order.merchantId),
+    resolved: true,
+  });
 
-    await recordCommunication({
-      merchantId: String(updated.merchantId),
-      orderId: updated.id,
-      channel: "whatsapp",
-      direction: "inbound",
-      type: "confirmation_response",
-      status: action === "confirm" ? "confirmed" : "cancelled",
-      providerMessageId,
-    });
+  try {
+    if (action === "confirm") {
+      logger.info("whatsapp_confirm_order", { orderId, providerMessageId });
+      const updated = await confirmOrder(order.id, { channel: "whatsapp", providerMessageId });
+      await recordCommunication({
+        merchantId: String(updated.merchantId),
+        orderId: updated.id,
+        channel: "whatsapp",
+        direction: "inbound",
+        type: "confirmation_response",
+        status: "confirmed",
+        providerMessageId,
+      });
+    } else {
+      logger.info("whatsapp_cancel_order", { orderId, providerMessageId });
+      // Records that the customer tapped cancel, distinct from the order
+      // actually becoming cancelled later once the reason is collected — see
+      // confirmation.service.ts's startCancellationReasonCollection.
+      await recordCommunication({
+        merchantId: String(order.merchantId),
+        orderId: order.id,
+        channel: "whatsapp",
+        direction: "inbound",
+        type: "confirmation_response",
+        status: "cancellation_requested",
+        providerMessageId,
+      });
+      await startCancellationReasonCollection(order.id, { channel: "whatsapp", providerMessageId });
+    }
   } catch (err) {
     if (err instanceof ApiError && err.code === "INVALID_TRANSITION") {
       await recordCommunication({
@@ -327,15 +470,26 @@ async function processStatusUpdate(status: MetaStatus): Promise<void> {
   }
 }
 
-const simulateSchema = z.object({
-  orderId: z.string().min(1),
-  action: z.enum(["confirm", "cancel"]),
-});
+const simulateSchema = z
+  .object({
+    orderId: z.string().min(1),
+    action: z.enum(["confirm", "cancel", "cancellation_reason"]),
+    reason: z.string().min(1).optional(),
+  })
+  .refine((v) => v.action !== "cancellation_reason" || Boolean(v.reason), {
+    message: 'reason is required when action is "cancellation_reason".',
+    path: ["reason"],
+  });
 
 /**
  * Dev-only: lets the full order -> WhatsApp confirmation -> response loop be tested
- * locally without real WhatsApp credentials. Mirrors what a real button-reply webhook
- * does. Disabled whenever the mock provider isn't active.
+ * locally without real WhatsApp credentials, including the two-step cancel ->
+ * reason -> cancelled flow. Mirrors what real webhook deliveries do — a
+ * button reply carries `context.id` pointing at the outbound confirmation
+ * message's wamid (see resolveOrderIdFromContext), and a cancellation reason
+ * is a plain text message from the order's own customer phone (see
+ * tryHandleAsCancellationReason) — rather than shortcutting past that
+ * correlation logic. Disabled whenever the mock provider isn't active.
  */
 export const simulateWhatsAppReply = asyncHandler(async (req: Request, res: Response) => {
   if (env.whatsapp.provider !== "mock") {
@@ -343,12 +497,47 @@ export const simulateWhatsAppReply = asyncHandler(async (req: Request, res: Resp
   }
 
   const input = simulateSchema.parse(req.body);
-  await processInboundMessage({
-    id: `sim_${crypto.randomUUID()}`,
-    type: "interactive",
-    interactive: { button_reply: { id: `${input.action}:${input.orderId}` } },
-  });
-
   const order = await OrderModel.findById(input.orderId);
-  sendSuccess(res, { order });
+  if (!order) {
+    return sendError(res, 404, "ORDER_NOT_FOUND", "No order with that id.");
+  }
+
+  if (input.action === "cancellation_reason") {
+    await processInboundMessage({
+      id: `sim_${crypto.randomUUID()}`,
+      from: order.customer.phone,
+      type: "text",
+      text: { body: input.reason as string },
+    });
+  } else {
+    const events = await listCommunicationsForOrder(input.orderId);
+    const lastOutboundConfirmation = [...events]
+      .reverse()
+      .find((e) => e.direction === "outbound" && e.type === "confirmation_sent" && e.providerMessageId);
+
+    if (!lastOutboundConfirmation?.providerMessageId) {
+      return sendError(
+        res,
+        400,
+        "NO_OUTBOUND_MESSAGE",
+        "This order has no outbound confirmation message to reply to yet."
+      );
+    }
+
+    await processInboundMessage({
+      id: `sim_${crypto.randomUUID()}`,
+      from: order.customer.phone,
+      type: "interactive",
+      interactive: {
+        button_reply: {
+          id: input.action === "confirm" ? "confirm_order" : "cancel_order",
+          title: input.action === "confirm" ? "تأكيد الطلب" : "إلغاء الطلب",
+        },
+      },
+      context: { id: lastOutboundConfirmation.providerMessageId },
+    });
+  }
+
+  const refreshed = await OrderModel.findById(input.orderId);
+  sendSuccess(res, { order: refreshed });
 });

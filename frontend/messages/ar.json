@@ -184,7 +184,13 @@
       "markCancelled": "وضع علامة كملغى",
       "noChannel": "لم يُرسل بعد"
     },
-    "status": { "pending": "بانتظار التأكيد", "confirmed": "مؤكد", "cancelled": "ملغى", "expired": "منتهي" },
+    "status": {
+      "pending": "بانتظار التأكيد",
+      "awaiting_cancellation_reason": "بانتظار سبب الإلغاء",
+      "confirmed": "مؤكد",
+      "cancelled": "ملغى",
+      "expired": "منتهي"
+    },
     "events": {
       "order_received": "تم استلام الطلب",
       "confirmation_sent": "تم إرسال التأكيد",
@@ -192,9 +198,11 @@
       "confirmation_sent_delivered": "تم تسليم رسالة التأكيد",
       "confirmation_sent_read": "تمت قراءة رسالة التأكيد",
       "confirmation_response_confirmed": "العميل أكّد الطلب",
+      "confirmation_response_cancellation_requested": "العميل طلب إلغاء الطلب",
       "confirmation_response_cancelled": "العميل ألغى الطلب",
       "confirmation_response_invalid": "تم تجاهل الرد (الطلب مغلق بالفعل)",
       "confirmation_failed": "فشل إرسال رسالة التأكيد",
+      "cancellation_reason_requested": "تم سؤال العميل عن سبب الإلغاء",
       "order_expired": "انتهت صلاحية الطلب",
       "store_synced": "تم تحديث المتجر",
       "store_sync_failed": "فشل تحديث المتجر"

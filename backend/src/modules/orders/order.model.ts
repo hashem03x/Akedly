@@ -1,6 +1,17 @@
 import { Schema, model, Types, type InferSchemaType, type HydratedDocument } from "mongoose";
 
-export const CONFIRMATION_STATUSES = ["pending", "confirmed", "cancelled", "expired"] as const;
+// "awaiting_cancellation_reason" sits between pending and cancelled: the customer
+// tapped the cancel button, but the order isn't actually cancelled yet — Akedly
+// is waiting on their free-text reply with a reason. See confirmation.service.ts's
+// startCancellationReasonCollection/completeCancellationWithReason and
+// webhooks/whatsapp.webhook.ts's tryHandleAsCancellationReason.
+export const CONFIRMATION_STATUSES = [
+  "pending",
+  "awaiting_cancellation_reason",
+  "confirmed",
+  "cancelled",
+  "expired",
+] as const;
 export type ConfirmationStatus = (typeof CONFIRMATION_STATUSES)[number];
 
 export const CONFIRMATION_CHANNELS = ["whatsapp", "phone"] as const;
@@ -51,6 +62,7 @@ const orderSchema = new Schema(
     confirmationChannel: { type: String, enum: CONFIRMATION_CHANNELS, default: null },
     confirmedAt: { type: Date },
     cancelledAt: { type: Date },
+    cancellationReason: { type: String },
   },
   { timestamps: true }
 );
