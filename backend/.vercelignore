@@ -1,0 +1,11 @@
+# Never upload local build output — Vercel's own @vercel/node builder compiles
+# api/index.ts (and its imports, including src/app.ts) directly from source
+# into a single function bundle. A stray local `dist/` (from `npm run build`
+# run locally; gitignored, never committed) must not be treated as deploy
+# input, since tsc's unbundled per-file output (e.g. dist/src/app.js, which
+# re-exports the named `createApp` factory with no default export) is not a
+# valid Vercel Function on its own — see vercel.json's explicit `functions`
+# scoping to api/index.ts for the corresponding fix on the build side.
+dist/
+coverage/
+*.tsbuildinfo

@@ -61,14 +61,13 @@ export const env = {
     metaVerifyToken: (process.env.WHATSAPP_META_VERIFY_TOKEN ?? "").trim(),
     metaAppSecret: process.env.WHATSAPP_META_APP_SECRET ?? "",
     metaApiVersion: process.env.WHATSAPP_META_API_VERSION ?? "v20.0",
-    // The Meta-approved order-confirmation template. Name/language are fixed by
-    // template approval — Meta rejects a template send whose name/language don't
-    // exactly match what was approved, so these must never drift from what's
-    // actually approved in Meta Business Manager. Configurable (not hardcoded
-    // inline at the call site) per the project's existing provider-config
-    // convention, without requiring a code change to roll a re-approved template.
+    // The Meta-approved order-confirmation template's name. Configurable (not
+    // hardcoded inline at the call site) per the project's existing
+    // provider-config convention, without requiring a code change to roll a
+    // re-approved template. The template's LANGUAGE is deliberately NOT here —
+    // see CONFIRMATION_TEMPLATE_LANGUAGE in whatsapp-meta.provider.ts for why
+    // it's a hardcoded literal, not env-configurable.
     confirmationTemplateName: process.env.WHATSAPP_CONFIRMATION_TEMPLATE_NAME ?? "akedly_order_confirmation",
-    confirmationTemplateLanguage: process.env.WHATSAPP_CONFIRMATION_TEMPLATE_LANGUAGE ?? "en",
     twilioAccountSid: process.env.WHATSAPP_TWILIO_ACCOUNT_SID ?? "",
     twilioAuthToken: process.env.WHATSAPP_TWILIO_AUTH_TOKEN ?? "",
     twilioFromNumber: process.env.WHATSAPP_TWILIO_FROM_NUMBER ?? "",

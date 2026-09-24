@@ -25,6 +25,20 @@ function messagesUrl(): string {
   return `https://graph.facebook.com/${env.whatsapp.metaApiVersion}/${env.whatsapp.metaPhoneNumberId}/messages`;
 }
 
+/**
+ * MUST always be exactly "en" — independently verified against Meta's API by
+ * hand (manual template send succeeded with this exact value) for the
+ * approved akedly_order_confirmation template. Not "en_US"/"en_GB"/"ar"/
+ * "ar_EG" — Meta treats template language as an exact match against what was
+ * approved, not a locale negotiation. Deliberately a hardcoded literal, not
+ * read from env/config or derived from customer/merchant locale — see PART 1
+ * of the 2026-09-25 production incident report. Only this template is
+ * affected; sendTemplateMessage (used for the separate hello_world
+ * connectivity diagnostic) and all non-WhatsApp Arabic/English localization
+ * elsewhere in the app are untouched.
+ */
+export const CONFIRMATION_TEMPLATE_LANGUAGE = "en";
+
 /** Normalizes a Meta Graph API error response. Never includes the access token. */
 function parseMetaError(httpStatus: number, body: MetaErrorBody): ProviderApiErrorInfo {
   return {
@@ -70,7 +84,44 @@ export class WhatsAppMetaProvider implements WhatsAppProvider {
     }
 
     const templateName = env.whatsapp.confirmationTemplateName;
-    const templateLanguage = env.whatsapp.confirmationTemplateLanguage;
+
+    const template = {
+      name: templateName,
+      language: { code: CONFIRMATION_TEMPLATE_LANGUAGE as string },
+      components: [
+        {
+          type: "body",
+          parameters: [
+            { type: "text", parameter_name: "customer_name", text: input.customerName },
+            { type: "text", parameter_name: "order_id", text: `#${input.orderNumber}` },
+            { type: "text", parameter_name: "store_name", text: input.storeName },
+            // Formatted in the template's own language (fixed to "en" by
+            // approval), not the merchant's messageLanguage setting — an
+            // Arabic-formatted number ("500 جنيه") inside an English
+            // template body would read as broken, not localized.
+            { type: "text", parameter_name: "order_total", text: formatCurrency(input.total, input.currency, "en") },
+          ],
+        },
+      ],
+    };
+
+    // Guarantees the contract at the boundary rather than trusting every
+    // future edit to keep it right — checks the actually-constructed payload
+    // (not just the constant above), so it still catches drift if this
+    // function is ever changed to source the language from somewhere else.
+    // The provider must never silently "correct" a wrong value here; a wrong
+    // value means the send must not happen at all.
+    if (template.language.code !== "en") {
+      throw new Error('Akedly order confirmation template must use language code "en".');
+    }
+
+    logger.info("order_confirmation_template_payload", {
+      template: template.name,
+      language: template.language.code,
+      messageType: "template",
+      orderId: input.orderId,
+      provider: "meta",
+    });
 
     logger.info("order_confirmation_template_send_started", {
       provider: "meta",
@@ -78,35 +129,32 @@ export class WhatsAppMetaProvider implements WhatsAppProvider {
       recipient: maskPhone(input.toPhone),
       messageType: "template",
       template: templateName,
-      language: templateLanguage,
+      language: template.language.code,
       phoneNumberId: maskPhone(env.whatsapp.metaPhoneNumberId),
     });
 
-    const result = await this.send(
-      {
-        messaging_product: "whatsapp",
-        to: input.toPhone,
-        type: "template",
-        template: {
-          name: templateName,
-          language: { code: templateLanguage },
-          components: [
-            {
-              type: "body",
-              parameters: [
-                { type: "text", parameter_name: "customer_name", text: input.customerName },
-                { type: "text", parameter_name: "order_id", text: `#${input.orderNumber}` },
-                { type: "text", parameter_name: "store_name", text: input.storeName },
-                // Formatted in the template's own language (fixed to "en" by
-                // approval), not the merchant's messageLanguage setting — an
-                // Arabic-formatted number ("500 جنيه") inside an English
-                // template body would read as broken, not localized.
-                { type: "text", parameter_name: "order_total", text: formatCurrency(input.total, input.currency, "en") },
-              ],
-            },
-          ],
-        },
+    // Sanitized dump of the exact outgoing payload shape — proves what Akedly
+    // actually sends without leaking customer data (parameter values are
+    // stripped, only parameter_name/type survive) or the access token. Meant
+    // to be diffed against a known-good manual Meta API call when diagnosing
+    // provider-side rejections (e.g. Meta error 132001) — see PART 2 of the
+    // 2026-09-25 production incident report.
+    logger.info("meta_whatsapp_outgoing_request", {
+      phoneNumberId: maskPhone(env.whatsapp.metaPhoneNumberId),
+      recipient: maskPhone(input.toPhone),
+      type: "template",
+      template: {
+        name: template.name,
+        language: template.language,
+        components: template.components.map((c) => ({
+          type: c.type,
+          parameters: c.parameters.map((p) => ({ type: p.type, parameter_name: p.parameter_name })),
+        })),
       },
+    });
+
+    const result = await this.send(
+      { messaging_product: "whatsapp", to: input.toPhone, type: "template", template },
       { orderId: input.orderId }
     );
 

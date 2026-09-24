@@ -3,6 +3,7 @@ import { env } from "../../config/env";
 import { logger } from "../../utils/logger";
 import { maskPhone } from "../../utils/mask";
 import { formatCurrency } from "./message-templates";
+import { CONFIRMATION_TEMPLATE_LANGUAGE } from "./whatsapp-meta.provider";
 import type {
   OrderConfirmationMessageInput,
   SendMessageResult,
@@ -27,7 +28,7 @@ export class WhatsAppMockProvider implements WhatsAppProvider {
     logger.info(`[MOCK WHATSAPP] Template "${env.whatsapp.confirmationTemplateName}" sent to ${maskPhone(input.toPhone)}`, {
       orderId: input.orderId,
       template: env.whatsapp.confirmationTemplateName,
-      language: env.whatsapp.confirmationTemplateLanguage,
+      language: CONFIRMATION_TEMPLATE_LANGUAGE,
       parameters: {
         customer_name: input.customerName,
         order_id: `#${input.orderNumber}`,
