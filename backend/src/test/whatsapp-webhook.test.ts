@@ -23,6 +23,8 @@ const { OrderModel } = require("../modules/orders/order.model");
 const { CommunicationModel } = require("../modules/communications/communication.model");
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { WhatsAppMetaProvider } = require("../integrations/confirmation-providers/whatsapp-meta.provider");
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { sendConfirmationForOrder } = require("../modules/confirmations/confirmation.service");
 
 function sign(rawBody: string): string {
   return "sha256=" + crypto.createHmac("sha256", "test-whatsapp-app-secret").update(rawBody).digest("hex");
@@ -523,7 +525,13 @@ describe("WhatsAppMetaProvider", () => {
     // session (see whatsapp-meta.provider.ts's sendOrderConfirmation doc).
     expect(bodySent.type).toBe("template");
     expect(bodySent.template.name).toBe("akedly_order_confirmation");
+    // Exactly "en" — never a locale variant, and never derived from
+    // input.language ("ar" was passed above but must not leak through).
     expect(bodySent.template.language.code).toBe("en");
+    expect(bodySent.template.language.code).not.toBe("en_US");
+    expect(bodySent.template.language.code).not.toBe("en_GB");
+    expect(bodySent.template.language.code).not.toBe("ar");
+    expect(bodySent.template.language.code).not.toBe("ar_EG");
 
     const params = bodySent.template.components[0].parameters;
     expect(params).toEqual([
@@ -581,6 +589,37 @@ describe("WhatsAppMetaProvider", () => {
     expect(result.errorDetails).toMatchObject({ httpStatus: 401, code: 190, type: "OAuthException" });
     expect(result.error).not.toContain("test-access-token");
     expect(JSON.stringify(result)).not.toContain("test-access-token");
+  });
+
+  it("2026-09-25 production incident: a Meta 132001 ('Template name does not exist in the translation') response is recorded as a provider failure, not a false success", async () => {
+    global.fetch = jest.fn(async () => ({
+      ok: false,
+      status: 404,
+      json: async () => ({
+        error: {
+          message: "(#132001) Template name does not exist in the translation",
+          type: "OAuthException",
+          code: 132001,
+        },
+      }),
+    })) as unknown as typeof fetch;
+
+    const provider = new WhatsAppMetaProvider();
+    const result = await provider.sendOrderConfirmation({
+      orderId: "order1",
+      toPhone: "+201001234567",
+      language: "ar",
+      customerName: "Ahmed",
+      storeName: "Leopard",
+      orderNumber: "1042",
+      items: [],
+      total: 100,
+      currency: "EGP",
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.errorDetails).toMatchObject({ httpStatus: 404, code: 132001 });
+    expect(result.providerMessageId).toBeUndefined();
   });
 
   it("returns a safe failure when credentials aren't configured", async () => {
