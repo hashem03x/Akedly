@@ -85,6 +85,35 @@ export class WhatsAppMetaProvider implements WhatsAppProvider {
 
     const templateName = env.whatsapp.confirmationTemplateName;
 
+    // Every one of these four values must be a real, non-empty string before
+    // this ever reaches Meta. An undefined/empty value here would silently
+    // produce a template parameter with no "text" field — which Meta rejects
+    // — so this fails loudly and names exactly which internal field was
+    // empty, rather than sending a partial payload and finding out later
+    // from a 400. See PART 2 of the 2026-09-26 production incident report.
+    const parameterValues: Record<string, string> = {
+      customer_name: input.customerName,
+      order_id: `#${input.orderNumber}`,
+      store_name: input.storeName,
+      order_total: formatCurrency(input.total, input.currency, "en"),
+    };
+
+    const missingParameters = Object.entries(parameterValues)
+      .filter(([, value]) => typeof value !== "string" || value.trim().length === 0)
+      .map(([name]) => name);
+
+    if (missingParameters.length > 0) {
+      logger.error("whatsapp_template_parameters_invalid", {
+        orderId: input.orderId,
+        template: templateName,
+        missingParameters,
+      });
+      return {
+        success: false,
+        error: `Missing required template parameter value(s): ${missingParameters.join(", ")}.`,
+      };
+    }
+
     const template = {
       name: templateName,
       language: { code: CONFIRMATION_TEMPLATE_LANGUAGE as string },
@@ -92,14 +121,14 @@ export class WhatsAppMetaProvider implements WhatsAppProvider {
         {
           type: "body",
           parameters: [
-            { type: "text", parameter_name: "customer_name", text: input.customerName },
-            { type: "text", parameter_name: "order_id", text: `#${input.orderNumber}` },
-            { type: "text", parameter_name: "store_name", text: input.storeName },
+            { type: "text", parameter_name: "customer_name", text: parameterValues.customer_name },
+            { type: "text", parameter_name: "order_id", text: parameterValues.order_id },
+            { type: "text", parameter_name: "store_name", text: parameterValues.store_name },
             // Formatted in the template's own language (fixed to "en" by
             // approval), not the merchant's messageLanguage setting — an
             // Arabic-formatted number ("500 جنيه") inside an English
             // template body would read as broken, not localized.
-            { type: "text", parameter_name: "order_total", text: formatCurrency(input.total, input.currency, "en") },
+            { type: "text", parameter_name: "order_total", text: parameterValues.order_total },
           ],
         },
       ],
@@ -114,6 +143,15 @@ export class WhatsAppMetaProvider implements WhatsAppProvider {
     if (template.language.code !== "en") {
       throw new Error('Akedly order confirmation template must use language code "en".');
     }
+
+    // Never logs the token itself — only whether one is configured and its
+    // length, and the last 4 digits of the phone number id (safe: it's an
+    // identifier, not a secret) so a phone-number/WABA mismatch — the actual
+    // cause of Meta error 132001 in the 2026-09-25/26 incident — is directly
+    // visible in logs instead of requiring a manual .env comparison.
+    const phoneNumberIdLast4 = env.whatsapp.metaPhoneNumberId.slice(-4);
+    const tokenConfigured = Boolean(env.whatsapp.metaAccessToken);
+    const tokenLength = env.whatsapp.metaAccessToken.length;
 
     logger.info("order_confirmation_template_payload", {
       template: template.name,
@@ -131,16 +169,23 @@ export class WhatsAppMetaProvider implements WhatsAppProvider {
       template: templateName,
       language: template.language.code,
       phoneNumberId: maskPhone(env.whatsapp.metaPhoneNumberId),
+      phoneNumberIdLast4,
+      tokenConfigured,
+      tokenLength,
     });
 
     // Sanitized dump of the exact outgoing payload shape — proves what Akedly
-    // actually sends without leaking customer data (parameter values are
-    // stripped, only parameter_name/type survive) or the access token. Meant
-    // to be diffed against a known-good manual Meta API call when diagnosing
-    // provider-side rejections (e.g. Meta error 132001) — see PART 2 of the
-    // 2026-09-25 production incident report.
+    // actually sends without leaking customer data or the access token.
+    // textPresent/textLength prove every parameter carries a real value
+    // WITHOUT exposing it — the previous version of this log stripped `text`
+    // entirely, which (understandably) read as evidence of a bug when it was
+    // only ever a logging omission; the real payload sent below has always
+    // included `text`, enforced now by the validation above. Meant to be
+    // diffed against a known-good manual Meta API call when diagnosing
+    // provider-side rejections (e.g. Meta error 132001).
     logger.info("meta_whatsapp_outgoing_request", {
       phoneNumberId: maskPhone(env.whatsapp.metaPhoneNumberId),
+      phoneNumberIdLast4,
       recipient: maskPhone(input.toPhone),
       type: "template",
       template: {
@@ -148,7 +193,12 @@ export class WhatsAppMetaProvider implements WhatsAppProvider {
         language: template.language,
         components: template.components.map((c) => ({
           type: c.type,
-          parameters: c.parameters.map((p) => ({ type: p.type, parameter_name: p.parameter_name })),
+          parameters: c.parameters.map((p) => ({
+            type: p.type,
+            parameter_name: p.parameter_name,
+            textPresent: p.text.length > 0,
+            textLength: p.text.length,
+          })),
         })),
       },
     });

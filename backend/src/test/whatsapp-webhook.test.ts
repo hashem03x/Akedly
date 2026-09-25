@@ -646,4 +646,53 @@ describe("WhatsAppMetaProvider", () => {
     process.env.WHATSAPP_META_ACCESS_TOKEN = previousToken;
     jest.resetModules();
   });
+
+  it("2026-09-26: refuses to send (and never calls Meta) when a required template parameter value is missing", async () => {
+    const fetchSpy = jest.fn();
+    global.fetch = fetchSpy as unknown as typeof fetch;
+
+    const provider = new WhatsAppMetaProvider();
+    const result = await provider.sendOrderConfirmation({
+      orderId: "order1",
+      toPhone: "+201001234567",
+      language: "en",
+      customerName: "", // missing — must never be silently sent as an empty/undefined "text"
+      storeName: "Leopard",
+      orderNumber: "1042",
+      items: [],
+      total: 100,
+      currency: "EGP",
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("customer_name");
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("2026-09-26: the real outgoing payload always carries actual text values — the sanitized log (textPresent/textLength) does not mean text is missing from the request", async () => {
+    let sentBody: any;
+    global.fetch = jest.fn(async (_url: string, init: RequestInit) => {
+      sentBody = JSON.parse(init.body as string);
+      return { ok: true, status: 200, json: async () => ({ messages: [{ id: "wamid.PROOF1" }] }) } as Response;
+    }) as typeof fetch;
+
+    const provider = new WhatsAppMetaProvider();
+    await provider.sendOrderConfirmation({
+      orderId: "order1",
+      toPhone: "+201001234567",
+      language: "en",
+      customerName: "Hashem",
+      storeName: "Akedly Demo Store",
+      orderNumber: "1001",
+      items: [],
+      total: 500,
+      currency: "EGP",
+    });
+
+    const params = sentBody.template.components[0].parameters;
+    for (const p of params) {
+      expect(typeof p.text).toBe("string");
+      expect(p.text.length).toBeGreaterThan(0);
+    }
+  });
 });

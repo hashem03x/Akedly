@@ -63,3 +63,62 @@ export const sendWhatsAppDiagnostic = asyncHandler(async (req: AuthenticatedRequ
     });
   })
 );
+
+/**
+ * Exercises the REAL order-confirmation template (akedly_order_confirmation,
+ * language "en") via the exact same sendOrderConfirmation code path
+ * production Shopify orders use — independent of Shopify/order data, so a
+ * failure here reproduces the real Meta error (e.g. 132001) without needing
+ * a live order, and isolates it from the hello_world diagnostic above (which
+ * only proves the token/phone-number-id can send *some* template, not that
+ * THIS template resolves against the WABA Akedly is configured for).
+ * Test values only — never real customer data, never hardcoded credentials.
+ */
+export const sendWhatsAppTemplateDiagnostic = asyncHandler(async (req: AuthenticatedRequest, res: Response) =>
+  runWithRequestId(generateRequestId(), async () => {
+    const input = diagnosticSchema.parse(req.body);
+    const maskedPhone = maskPhone(input.phone);
+
+    logger.info("whatsapp_template_diagnostic_started", {
+      merchantId: req.merchantId,
+      provider: env.whatsapp.provider,
+      recipient: maskedPhone,
+    });
+
+    const provider = getWhatsAppProvider();
+    const startedAt = Date.now();
+
+    const result = await provider.sendOrderConfirmation({
+      orderId: "diagnostic",
+      toPhone: input.phone,
+      language: "en",
+      customerName: "Test Customer",
+      storeName: "Akedly Diagnostic",
+      orderNumber: "0000",
+      items: [],
+      total: 1,
+      currency: "EGP",
+    });
+
+    const durationMs = Date.now() - startedAt;
+
+    logger.info("whatsapp_template_diagnostic_completed", {
+      merchantId: req.merchantId,
+      provider: env.whatsapp.provider,
+      recipient: maskedPhone,
+      success: result.success,
+      providerMessageId: result.providerMessageId,
+      durationMs,
+    });
+
+    sendSuccess(res, {
+      provider: env.whatsapp.provider,
+      recipient: maskedPhone,
+      success: result.success,
+      providerMessageId: result.providerMessageId,
+      error: result.error,
+      errorDetails: result.errorDetails,
+      durationMs,
+    });
+  })
+);
